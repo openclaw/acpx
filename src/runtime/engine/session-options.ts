@@ -5,6 +5,13 @@ export type SystemPromptOption = string | { append: string };
 export type SessionAgentOptions = {
   model?: string;
   allowedTools?: string[];
+  /**
+   * Claude Agent SDK tool deny list, forwarded as
+   * `_meta.claudeCode.options.disallowedTools` on session creation, load, and
+   * resume, and saved with the session record for reconnects. An explicit
+   * empty array is distinct from omission.
+   */
+  disallowedTools?: string[];
   maxTurns?: number;
   systemPrompt?: SystemPromptOption;
   /**
@@ -24,11 +31,13 @@ export function mergeSessionOptions(
   fallback: SessionAgentOptions | undefined,
 ): SessionAgentOptions | undefined {
   const merged: SessionAgentOptions = { ...fallback };
-  assignDefinedOption(merged, "model", preferred?.model);
-  assignDefinedOption(merged, "allowedTools", preferred?.allowedTools);
-  assignDefinedOption(merged, "maxTurns", preferred?.maxTurns);
-  assignDefinedOption(merged, "systemPrompt", preferred?.systemPrompt);
-  assignDefinedOption(merged, "env", mergeEnvRecords(fallback?.env, preferred?.env));
+  const overrides = preferred ?? {};
+  assignDefinedOption(merged, "model", overrides.model);
+  assignDefinedOption(merged, "allowedTools", overrides.allowedTools);
+  assignDefinedOption(merged, "disallowedTools", overrides.disallowedTools);
+  assignDefinedOption(merged, "maxTurns", overrides.maxTurns);
+  assignDefinedOption(merged, "systemPrompt", overrides.systemPrompt);
+  assignDefinedOption(merged, "env", mergeEnvRecords(fallback?.env, overrides.env));
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
@@ -90,7 +99,8 @@ export function sessionOptionsFromRecord(record: SessionRecord): SessionAgentOpt
 
   const sessionOptions: SessionAgentOptions = {};
   assignDefinedOption(sessionOptions, "model", nonEmptyString(stored.model));
-  assignDefinedOption(sessionOptions, "allowedTools", storedAllowedTools(stored.allowed_tools));
+  assignDefinedOption(sessionOptions, "allowedTools", storedToolList(stored.allowed_tools));
+  assignDefinedOption(sessionOptions, "disallowedTools", storedToolList(stored.disallowed_tools));
   assignDefinedOption(sessionOptions, "maxTurns", storedMaxTurns(stored.max_turns));
   assignDefinedOption(
     sessionOptions,
@@ -110,6 +120,10 @@ function persistedSessionOptions(
   const next = {
     model: nonEmptyString(options.model),
     allowed_tools: Array.isArray(options.allowedTools) ? [...options.allowedTools] : undefined,
+    // Present only when supplied, so records without a deny list keep their shape.
+    ...(Array.isArray(options.disallowedTools)
+      ? { disallowed_tools: [...options.disallowedTools] }
+      : {}),
     max_turns: typeof options.maxTurns === "number" ? options.maxTurns : undefined,
     system_prompt: normalizeSystemPromptOption(options.systemPrompt),
     env: storedEnvRecord(options.env),
@@ -121,6 +135,7 @@ function hasPersistedSessionOptions(options: PersistedSessionOptions): boolean {
   return (
     options.model !== undefined ||
     options.allowed_tools !== undefined ||
+    options.disallowed_tools !== undefined ||
     options.max_turns !== undefined ||
     options.system_prompt !== undefined ||
     options.env !== undefined
@@ -167,7 +182,7 @@ function nonEmptyPromptText(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function storedAllowedTools(value: unknown): string[] | undefined {
+function storedToolList(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every((item) => typeof item === "string")
     ? [...value]
     : undefined;

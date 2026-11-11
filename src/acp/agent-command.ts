@@ -308,6 +308,9 @@ function assignClaudeCodeOptions(
   if (Array.isArray(options.allowedTools)) {
     target.allowedTools = [...options.allowedTools];
   }
+  if (Array.isArray(options.disallowedTools)) {
+    target.disallowedTools = [...options.disallowedTools];
+  }
   if (typeof options.maxTurns === "number") {
     target.maxTurns = options.maxTurns;
   }

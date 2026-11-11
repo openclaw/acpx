@@ -64,6 +64,7 @@ test("parseQueueRequest accepts prompt session options", () => {
     sessionOptions: {
       model: "fast-model",
       allowedTools: ["Read", "Grep"],
+      disallowedTools: ["Bash"],
       maxTurns: 4,
       systemPrompt: { append: "keep it brief" },
       env: {
@@ -86,6 +87,7 @@ test("parseQueueRequest accepts prompt session options", () => {
     sessionOptions: {
       model: "fast-model",
       allowedTools: ["Read", "Grep"],
+      disallowedTools: ["Bash"],
       maxTurns: 4,
       systemPrompt: { append: "keep it brief" },
       env: {
@@ -93,6 +95,27 @@ test("parseQueueRequest accepts prompt session options", () => {
       },
     },
   });
+});
+
+test("parseQueueRequest keeps an explicit empty deny list distinct from omission", () => {
+  const base = {
+    type: "submit_prompt",
+    requestId: "req-deny-list",
+    message: "hello",
+    permissionMode: "approve-reads",
+    waitForCompletion: true,
+  };
+  const empty = parseQueueRequest({ ...base, sessionOptions: { disallowedTools: [] } });
+  assert.ok(empty && empty.type === "submit_prompt");
+  assert.deepEqual(empty.sessionOptions, { disallowedTools: [] });
+
+  const omitted = parseQueueRequest({ ...base, sessionOptions: { model: "fast-model" } });
+  assert.ok(omitted && omitted.type === "submit_prompt");
+  assert.deepEqual(omitted.sessionOptions, { model: "fast-model" });
+
+  for (const disallowedTools of ["Bash", ["Bash", 123]]) {
+    assert.equal(parseQueueRequest({ ...base, sessionOptions: { disallowedTools } }), null);
+  }
 });
 
 test("parseQueueRequest rejects invalid prompt session options", () => {

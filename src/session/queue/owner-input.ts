@@ -135,6 +135,7 @@ function assignQueueOwnerSessionOptions(
   options.sessionOptions = {};
   assignSessionModel(options.sessionOptions, sessionOpts.model);
   assignSessionAllowedTools(options.sessionOptions, sessionOpts.allowedTools);
+  assignSessionDisallowedTools(options.sessionOptions, sessionOpts.disallowedTools);
   assignSessionMaxTurns(options.sessionOptions, sessionOpts.maxTurns);
   assignSessionSystemPrompt(options.sessionOptions, sessionOpts.systemPrompt);
   assignSessionEnv(options.sessionOptions, sessionOpts.env);
@@ -156,6 +157,20 @@ function assignSessionAllowedTools(
   if (Array.isArray(value)) {
     options.allowedTools = value.filter((tool): tool is string => typeof tool === "string");
   }
+}
+
+function assignSessionDisallowedTools(
+  options: NonNullable<QueueOwnerRuntimeOptions["sessionOptions"]>,
+  value: unknown,
+): void {
+  if (value == null) {
+    return;
+  }
+  // Filtering would silently weaken a deny list, so reject the payload instead.
+  if (!Array.isArray(value) || value.some((tool) => typeof tool !== "string")) {
+    throw new Error("queue owner payload has invalid sessionOptions.disallowedTools");
+  }
+  options.disallowedTools = value.filter((tool): tool is string => typeof tool === "string");
 }
 
 function assignSessionMaxTurns(
