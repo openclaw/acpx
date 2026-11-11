@@ -188,6 +188,11 @@ test("parseSessionRecord migrates records saved under earlier built-in commands"
       ["npx", "-y", "@agentclientprotocol/codex-acp@^1.1.5"],
       "codex",
     ],
+    [
+      "npx -y --package=@agentclientprotocol/codex-acp@^1.1.5 -- codex-acp",
+      ["npx", "-y", "--package=@agentclientprotocol/codex-acp@^1.1.5", "--", "codex-acp"],
+      "codex",
+    ],
     ["npx -y @agentclientprotocol/claude-agent-acp@^0.95.0", undefined, "claude"],
     ["npx -y @kilocode/cli acp", ["npx", "-y", "@kilocode/cli", "acp"], "kilocode"],
     ["npx -y mux@^0.28.0 acp", undefined, "mux"],

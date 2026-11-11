@@ -8,7 +8,7 @@ import { resolveInstalledExecutable } from "./spawn-command-options.js";
 // previous command to LEGACY_AGENT_COMMANDS in src/acp/builtin-command-migration.ts.
 const ACP_ADAPTER_PACKAGE_RANGES = {
   pi: "^0.0.33",
-  codex: "^1.1.5",
+  codex: "^2.6.0",
   claude: "^0.95.0",
   mux: "^0.28.0",
 } as const;

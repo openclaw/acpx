@@ -22,6 +22,7 @@ export const LEGACY_AGENT_COMMANDS: Readonly<Record<string, readonly string[]>> 
     "npx -y @agentclientprotocol/codex-acp@^0.0.44",
     "npx -y @agentclientprotocol/codex-acp@^1.1.4",
     "npx -y @agentclientprotocol/codex-acp@^1.1.5",
+    "npx -y --package=@agentclientprotocol/codex-acp@^1.1.5 -- codex-acp",
   ],
   claude: [
     "npx @zed-industries/claude-agent-acp",

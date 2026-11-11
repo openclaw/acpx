@@ -206,10 +206,10 @@ test("claude built-in uses the current ACP adapter package range", () => {
 });
 
 test("npm-backed built-ins use current adapter package ranges", () => {
-  assert.equal(BUILT_IN_AGENT_PACKAGES.codex.packageRange, "^1.1.5");
+  assert.equal(BUILT_IN_AGENT_PACKAGES.codex.packageRange, "^2.6.0");
   assert.equal(
     AGENT_REGISTRY.codex,
-    "npx -y --package=@agentclientprotocol/codex-acp@^1.1.5 -- codex-acp",
+    "npx -y --package=@agentclientprotocol/codex-acp@^2.6.0 -- codex-acp",
   );
   assert.equal(AGENT_REGISTRY.pi, "npx --package=pi-acp@^0.0.33 -- pi-acp");
 });
@@ -313,7 +313,7 @@ test("built-in npx fallbacks name the adapter package and binary when the npm br
   );
   assert.deepEqual(npxFallbacks, {
     pi: ["npx", "--package=pi-acp@^0.0.33", "--", "pi-acp"],
-    codex: ["npx", "-y", "--package=@agentclientprotocol/codex-acp@^1.1.5", "--", "codex-acp"],
+    codex: ["npx", "-y", "--package=@agentclientprotocol/codex-acp@^2.6.0", "--", "codex-acp"],
     claude: [
       "npx",
       "-y",
@@ -330,7 +330,7 @@ test("built-in npx fallbacks name the adapter package and binary when the npm br
 test("resolveBuiltInAgentLaunch accepts the previous positional npx defaults", () => {
   const npmCliPath = path.join(os.tmpdir(), "acpx-test-positional-npm-cli.js");
   for (const [name, previousCommand] of [
-    ["codex", "npx -y @agentclientprotocol/codex-acp@^1.1.5"],
+    ["codex", "npx -y @agentclientprotocol/codex-acp@^2.6.0"],
     ["claude", "npx -y @agentclientprotocol/claude-agent-acp@^0.95.0"],
   ] as const) {
     const launch = resolveBuiltInAgentLaunch(previousCommand, {
