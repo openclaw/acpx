@@ -8,6 +8,7 @@ import { recordPromptResponseUsage } from "../../session/conversation-model.js";
 import type {
   AcpElicitationHandler,
   AcpPermissionHandler,
+  AcpQuestionHandler,
   PromptInput,
   RunPromptResult,
   SessionConversation,
@@ -30,6 +31,7 @@ type PromptTurnClient = {
     onElicitation?: AcpElicitationHandler,
     onPermissionRequest?: AcpPermissionHandler,
     authority?: AcpControlAuthority,
+    onQuestionRequest?: AcpQuestionHandler,
   ) => Promise<{
     stopReason: RunPromptResult["stopReason"];
     usage?: unknown;
@@ -86,6 +88,7 @@ export async function runPromptTurn(params: {
   onPromptStarted?: () => Promise<void> | void;
   onElicitation?: AcpElicitationHandler;
   onPermissionRequest?: AcpPermissionHandler;
+  onQuestionRequest?: AcpQuestionHandler;
   authority?: AcpControlAuthority;
 }): Promise<{
   stopReason: RunPromptResult["stopReason"];
@@ -102,6 +105,7 @@ export async function runPromptTurn(params: {
       params.onElicitation,
       params.onPermissionRequest,
       promptRequestAuthority(lifetime, params.authority),
+      params.onQuestionRequest,
     );
     void promptPromise.then(
       (response) => {

@@ -14,6 +14,7 @@ import type {
   AcpElicitationHandler,
   AcpElicitationMode,
   AcpPermissionHandler,
+  AcpQuestionHandler,
   AcpProcessLifecycle,
   McpServer,
   NonInteractivePermissionPolicy,
@@ -35,7 +36,10 @@ export type {
   AcpElicitationResponse,
   AcpPermissionDecision,
   AcpPermissionHandler,
+  AcpQuestionHandler,
   AcpPermissionRequest,
+  AcpQuestionDecision,
+  AcpQuestionRequest,
   AcpProcessExit,
   AcpProcessLaunch,
   AcpProcessLaunchScope,
@@ -134,6 +138,8 @@ export type AcpRuntimeTurnInput = AcpControlAuthority & {
    * default callback.
    */
   onPermissionRequest?: AcpPermissionHandler;
+  /** Handles Antigravity fixed-choice questions separately from tool approval. */
+  onQuestionRequest?: AcpQuestionHandler;
   /** Handles ACP elicitation requests owned by this prompt turn. */
   onElicitation?: AcpElicitationHandler;
 };
@@ -493,6 +499,8 @@ export type AcpRuntimeOptions = {
   /** Optional lifecycle observer for ACP agent processes owned by this runtime. */
   processLifecycle?: AcpProcessLifecycle;
   onPermissionRequest?: AcpPermissionHandler;
+  /** Handles Antigravity fixed-choice questions separately from tool approval. */
+  onQuestionRequest?: AcpQuestionHandler;
   /**
    * ACP filesystem callback capability for new and reconnected session clients.
    * Omitted defaults to enabled, matching `AcpClientOptions`. Retained clients

@@ -35,6 +35,19 @@ export type AcpPermissionHandler = (
   context: { signal: AbortSignal },
 ) => Promise<AcpPermissionDecision | undefined>;
 
+/** Fixed-choice user answers, separate from tool authorization. */
+export type AcpQuestionRequest = {
+  sessionId: string;
+  raw: RequestPermissionRequest;
+};
+
+export type AcpQuestionDecision = { outcome: "selected"; optionId: string } | { outcome: "cancel" };
+
+export type AcpQuestionHandler = (
+  request: AcpQuestionRequest,
+  context: { signal: AbortSignal },
+) => Promise<AcpQuestionDecision | undefined>;
+
 export const ACP_ELICITATION_MODES = ["form", "url"] as const;
 export type AcpElicitationMode = (typeof ACP_ELICITATION_MODES)[number];
 export type AcpElicitationRequest = CreateElicitationRequest;
@@ -303,6 +316,7 @@ export type AcpClientOptions = {
   onClientOperation?: (operation: ClientOperation) => void;
   onPermissionEscalation?: (event: PermissionEscalationEvent) => void;
   onPermissionRequest?: AcpPermissionHandler;
+  onQuestionRequest?: AcpQuestionHandler;
 };
 
 export const SESSION_RECORD_SCHEMA = "acpx.session.v1" as const;
