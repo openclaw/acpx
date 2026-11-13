@@ -58,7 +58,9 @@ for (const method of [
     });
     await first.shutdown();
     observed.length = 0;
-    assert.equal((await runtime.doctor()).ok, true);
+    const report = await runtime.doctor();
+    assert.equal(report.ok, true);
+    assert.equal(report.agentCapabilities?.loadSession, true);
     assert.equal(observed.length, 0);
 
     if (method === "session/set_mode") {

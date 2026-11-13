@@ -10,6 +10,8 @@ import { createRuntimeOptions, InMemorySessionStore } from "./runtime-test-helpe
 
 test("probeRuntime uses the default agent override and reports protocol details", async () => {
   const store = new InMemorySessionStore();
+  const agentInfo = { name: "fixture", version: "1.0" };
+  const agentCapabilities = { loadSession: true, promptCapabilities: { image: true } };
   const constructed: Array<Record<string, unknown>> = [];
   const agentProcessEnv = { ACPX_TEST_RUNTIME_OVERLAY: "probe-only" };
   const permissionPolicy = {
@@ -40,7 +42,7 @@ test("probeRuntime uses the default agent override and reports protocol details"
       clientFactory: (options) => {
         constructed.push(options);
         return {
-          initializeResult: { protocolVersion: 1 },
+          initializeResult: { protocolVersion: 1, agentInfo, agentCapabilities },
           start: async () => {},
           close: async () => {},
         } as never;
@@ -49,6 +51,9 @@ test("probeRuntime uses the default agent override and reports protocol details"
   );
 
   assert.equal(report.ok, true);
+  assert.deepEqual(Reflect.get(report, "agentInfo"), agentInfo);
+  assert.deepEqual(Reflect.get(report, "agentCapabilities"), agentCapabilities);
+  assert.notEqual(Reflect.get(report, "agentCapabilities"), agentCapabilities);
   assert.equal(constructed[0]?.agentCommand, "codex-override --acp");
   assert.deepEqual(constructed[0]?.permissionPolicy, permissionPolicy);
   assert.deepEqual(constructed[0]?.agentProcessEnv, agentProcessEnv);

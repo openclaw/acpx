@@ -2,9 +2,16 @@ import { normalizeAgentCommandInput } from "../../acp/client-process.js";
 import { AcpClient } from "../../acp/client.js";
 import { DEFAULT_AGENT_NAME } from "../../agent-registry.js";
 import { TimeoutError } from "../../async-control.js";
-import type { AcpRuntimeOptions, AcpRuntimeSessionModels } from "./contract.js";
+import type {
+  AcpRuntimeDoctorReport,
+  AcpRuntimeOptions,
+  AcpRuntimeSessionModels,
+} from "./contract.js";
 
-export type RuntimeHealthReport = {
+export type RuntimeHealthReport = Pick<
+  AcpRuntimeDoctorReport,
+  "agentInfo" | "agentCapabilities"
+> & {
   ok: boolean;
   message: string;
   details?: string[];
@@ -169,6 +176,7 @@ export async function probeRuntime(
     return {
       ok: true,
       message: "embedded ACP runtime ready",
+      ...handshakeSnapshot(client),
       details: [
         `agent=${agentName}`,
         `command=${agentCommand.agentCommand}`,
@@ -192,6 +200,18 @@ export async function probeRuntime(
   } finally {
     await client.close().catch(() => {});
   }
+}
+
+function handshakeSnapshot(
+  client: AcpClient,
+): Pick<AcpRuntimeDoctorReport, "agentInfo" | "agentCapabilities"> {
+  const result = client.initializeResult;
+  return {
+    ...(result?.agentInfo ? { agentInfo: structuredClone(result.agentInfo) } : {}),
+    ...(result?.agentCapabilities
+      ? { agentCapabilities: structuredClone(result.agentCapabilities) }
+      : {}),
+  };
 }
 
 function createProbeClient(
