@@ -15,6 +15,7 @@ import type {
   AcpElicitationMode,
   AcpPermissionHandler,
   AcpProcessLifecycle,
+  AcpSessionRequestMeta,
   McpServer,
   NonInteractivePermissionPolicy,
   PermissionMode,
@@ -26,6 +27,8 @@ import type { SessionAgentOptions } from "../engine/session-options.js";
 export type { SessionAgentOptions, SystemPromptOption } from "../engine/session-options.js";
 
 export type {
+  AcpSessionRequestContext,
+  AcpSessionRequestMeta,
   AcpJsonRpcMessage,
   AcpMessageDirection,
   AcpElicitationHandler,
@@ -442,6 +445,14 @@ export type AcpRuntimeSessionPermissions = Partial<
 >;
 
 export type AcpRuntimeOptions = {
+  /**
+   * Resolve _meta for each new/load/resume request. The synchronous callback must
+   * return a plain JSON object (at most 256 KiB, 32 levels deep), or undefined.
+   * Host values replace generated top-level metadata namespaces; standard ACP
+   * request fields are unaffected. Callback failures reject the request.
+   * Neither the callback nor its result is persisted by acpx.
+   */
+  sessionRequestMeta?: AcpSessionRequestMeta;
   cwd: string;
   /** Trusted child-only environment, snapshotted at construction and never persisted. */
   agentProcessEnv?: Record<string, string>;
