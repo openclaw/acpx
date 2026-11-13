@@ -373,6 +373,7 @@ export class AcpRuntimeManager {
       ...options,
       onAcpMessage:
         options.processLaunchScope?.kind === "runtime-session" ? this.observeAcpMessage : undefined,
+      onQuestionRequest: this.options.onQuestionRequest,
       agentProcessEnv: this.options.agentProcessEnv,
       agentProcessEnvAllow: this.options.agentProcessEnvAllow,
       agentProcessEnvBlock: this.options.agentProcessEnvBlock,
@@ -1418,6 +1419,7 @@ export class AcpRuntimeManager {
       onPromptRequestWritten: () => task.promptStarted.resolve(),
       onElicitation: task.input.onElicitation,
       onPermissionRequest: task.input.onPermissionRequest,
+      onQuestionRequest: task.input.onQuestionRequest,
       authority: task.input,
     });
   }

@@ -35,7 +35,11 @@ import {
 } from "../src/errors.js";
 import { runPromptTurn } from "../src/runtime/engine/prompt-turn.js";
 import { createSessionConversation } from "../src/session/conversation-model.js";
-import type { AcpPermissionDecision, AcpProcessStarted } from "../src/types.js";
+import type {
+  AcpPermissionDecision,
+  AcpProcessStarted,
+  AcpQuestionDecision,
+} from "../src/types.js";
 import { withMockedReadline, withTtyState } from "./tty-test-helpers.js";
 
 test("parseAcpJsonMessageLine ignores non-object JSON values", () => {
@@ -524,6 +528,155 @@ for (const agentName of ["antigravity-acp", "custom-agent"]) {
     });
   }
 }
+
+function makeQuestionRequest(sessionId: string): RequestPermissionRequest {
+  return {
+    sessionId,
+    toolCall: { toolCallId: "interaction_question", title: "Choose a target", kind: "other" },
+    options: [
+      { optionId: "production", name: "Production", kind: "allow_once" },
+      { optionId: "staging", name: "Staging", kind: "allow_once" },
+    ],
+  };
+}
+
+for (const scenario of ["selected", "invalid", "cancel", "undefined", "throw"] as const) {
+  test(`AcpClient Antigravity question callback handles ${scenario} without approval fallback`, async (t) => {
+    let questionCalls = 0;
+    const fixture = createClientFixture(t, {
+      client: {
+        permissionMode: "approve-all",
+        onPermissionRequest: async () => {
+          assert.fail("questions must never reach tool approval");
+        },
+        onQuestionRequest: async (request, { signal }) => {
+          questionCalls += 1;
+          assert.equal(request.sessionId, "question-session");
+          assert.deepEqual(request.raw, makeQuestionRequest("question-session"));
+          assert.equal(signal.aborted, false);
+          if (scenario === "throw") {
+            throw new Error("host UI failed");
+          }
+          if (scenario === "undefined") {
+            return undefined;
+          }
+          if (scenario === "cancel") {
+            return { outcome: "cancel" };
+          }
+          return { outcome: "selected", optionId: scenario === "selected" ? "staging" : "missing" };
+        },
+      },
+    });
+    const internals = asInternals(fixture.client);
+    internals.initResult = { agentInfo: { name: "antigravity-acp", version: "1.1.1" } };
+    const prompt = fixture.prompt("question-session", "Continue");
+    const promptRequest = await fixture.message(0);
+    const response = await internals.handlePermissionRequest?.(
+      makeQuestionRequest("question-session"),
+    );
+    assert.deepEqual(response, {
+      outcome:
+        scenario === "selected"
+          ? { outcome: "selected", optionId: "staging" }
+          : { outcome: "cancelled" },
+    });
+    assert.equal(questionCalls, 1);
+    await fixture.reply(promptRequest);
+    await prompt;
+  });
+}
+
+for (const ending of ["cancel", "replace", "complete", "close"] as const) {
+  test(
+    `AcpClient Antigravity question answers expire on ${ending}`,
+    { timeout: 5_000 },
+    async (t) => {
+      const entered = createDeferred<AbortSignal>();
+      let calls = 0;
+      const answer = createDeferred<AcpQuestionDecision>();
+      const fixture = createClientFixture(t, {
+        release: () => answer.resolve({ outcome: "cancel" }),
+        client: {
+          onQuestionRequest: async (_request, { signal }) => {
+            calls += 1;
+            if (calls > 1) {
+              assert.equal(signal.aborted, false);
+              return { outcome: "selected", optionId: "production" };
+            }
+            entered.resolve(signal);
+            return await answer.promise;
+          },
+        },
+      });
+      const internals = asInternals(fixture.client);
+      internals.initResult = { agentInfo: { name: "antigravity-acp", version: "1.1.1" } };
+      const first = fixture.prompt("question-session", "First");
+      const firstRequest = await fixture.message(0);
+      const response = fixture.track(
+        internals.handlePermissionRequest!(makeQuestionRequest("question-session")),
+      );
+      const signal = await entered.promise;
+      let successor: Promise<unknown> | undefined;
+      let successorRequest: AnyMessage | undefined;
+      if (ending === "cancel") {
+        await fixture.client.cancel("question-session");
+      }
+      if (ending === "replace") {
+        successor = fixture.prompt("question-session", "Second");
+        successorRequest = await fixture.message(1);
+      }
+      if (ending === "complete") {
+        await fixture.reply(firstRequest);
+        await first;
+      }
+      if (ending === "close") {
+        await fixture.client.close();
+      }
+      assert.equal(signal.aborted, true);
+      assert.deepEqual(await response, { outcome: { outcome: "cancelled" } });
+      answer.resolve({ outcome: "selected", optionId: "staging" });
+      if (ending !== "complete" && ending !== "close") {
+        await fixture.reply(firstRequest);
+        await first;
+      }
+      if (successorRequest) {
+        assert.deepEqual(
+          await internals.handlePermissionRequest?.(makeQuestionRequest("question-session")),
+          {
+            outcome: { outcome: "selected", optionId: "production" },
+          },
+        );
+        await fixture.reply(successorRequest);
+        await successor;
+      }
+    },
+  );
+}
+
+test("AcpClient Antigravity questions cannot use a callback from another session", async (t) => {
+  const fixture = createClientFixture(t, {
+    client: {
+      onQuestionRequest: async () => {
+        assert.fail("an unowned question must not reach the host");
+      },
+    },
+  });
+  const internals = asInternals(fixture.client);
+  internals.initResult = { agentInfo: { name: "antigravity-acp", version: "1.1.1" } };
+  const prompt = fixture.prompt("owner-session", "Continue");
+  const promptRequest = await fixture.message(0);
+  assert.deepEqual(
+    await internals.handlePermissionRequest?.(makeQuestionRequest("other-session")),
+    {
+      outcome: { outcome: "cancelled" },
+    },
+  );
+  await fixture.reply(promptRequest);
+  await prompt;
+  const next = fixture.prompt("other-session", "Continue after the unowned request");
+  await fixture.reply(await fixture.message(1));
+  await next;
+});
 
 test("AcpClient handlePermissionRequest short-circuits cancels and tracks unavailable prompts", async () => {
   const client = makeClient({

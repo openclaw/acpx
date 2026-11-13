@@ -132,6 +132,7 @@ export class SharedAcpRuntime {
       "sessionPermissions",
       "processLifecycle",
       "onPermissionRequest",
+      "onQuestionRequest",
       "onAcpMessage",
       "elicitationModes",
       "fs",
@@ -216,9 +217,12 @@ export class SharedAcpRuntime {
     this.assertOpen();
     if (
       input.mode !== "prompt" ||
-      input.assertActive ||
-      input.onPermissionRequest ||
-      input.onElicitation
+      [
+        input.assertActive,
+        input.onPermissionRequest,
+        input.onQuestionRequest,
+        input.onElicitation,
+      ].some(Boolean)
     ) {
       invalidOption(
         "Shared turns support prompt mode and the client's static permission policy; in-process callbacks and steering are unsupported.",

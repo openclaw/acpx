@@ -57,9 +57,22 @@ session reconnect and model configuration support.
 
 Antigravity sends fixed-choice user questions through `session/request_permission`
 with an `interaction_` tool-call ID. Their options represent answers, not tool
-approvals. acpx cancels these requests and reports that a user answer is required,
-including under `--approve-all` or an embedding host's permission handler.
-This also applies to existing custom launchers when the runtime identifies itself
-as `antigravity-acp`; it is not limited to the named shortcut.
-Continue those conversations in a client supporting Antigravity questions.
+approvals. By default, acpx cancels these requests and reports that a user answer
+is required, including under `--approve-all` or an embedding host's permission
+handler. This also applies to custom launchers identifying as `antigravity-acp`.
 Ordinary tool permissions still follow acpx's permission policy.
+
+In-process runtime hosts can provide `onQuestionRequest` in `createAcpRuntime`
+options or override it for one `startTurn` / `runTurn` call. The callback receives
+`{ sessionId, raw }` and `{ signal }`; `raw` is the ACP permission request,
+including the question's title and exact answer options. Present those options to
+the user and return `{ outcome: "selected", optionId }` for their answer, or
+`{ outcome: "cancel" }` to dismiss it. Only an ID offered in that request is
+accepted. An undefined result, callback failure, or invalid ID cancels the
+question and never falls back to permission approval.
+
+The signal aborts when the request or owning turn is cancelled, replaced, finished,
+or disconnected. Hosts should dismiss their form on abort; late answers are
+ignored. Question callbacks require a matching active session turn. The shared
+runtime and CLI do not support these host callbacks; continue those conversations
+in an interactive client when an answer is required.
