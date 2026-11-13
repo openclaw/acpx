@@ -69,6 +69,7 @@ Notes:
 - Top-level `flow run <file>` executes a user-authored workflow module and persists run state under `~/.acpx/flows/runs/`.
 - If a prompt argument is omitted, `acpx` reads prompt text from stdin when piped.
 - `--file` works for implicit prompt, `prompt`, and `exec` commands.
+- A `--file` path that does not exist or is a directory fails with `Prompt file not found: <path>` or `Prompt file is not a file: <path>` (exit 1) before any agent starts.
 - After an agent name, `--file` may appear before or after `prompt`/`exec`; an explicit value on the subcommand wins. `--no-wait` works before or after `prompt`, and omission still waits normally.
 - `acpx` with no args in an interactive terminal shows help.
 
@@ -85,7 +86,7 @@ acpx [global_options] flow run <file> [--input-json <json> | --input-file <path>
 - `acp` and `action` nodes use the global `--timeout` value as their default step timeout. If `--timeout` is omitted, flows default to 15 minutes per active step.
 - Flows may declare permission requirements. If a flow requires an explicit grant such as `approve-all`, `acpx` fails fast before starting the flow and tells you which permission flag to pass.
 - `--input-json` passes flow input inline as JSON.
-- `--input-file` reads flow input JSON from disk.
+- `--input-file` reads flow input JSON from disk; a path that does not exist or is a directory fails with `Flow input file not found: <path>` or `Flow input file is not a file: <path>`.
 - `--default-agent` supplies the default agent profile for `acp` nodes that do not pin one.
 - Repeatable `--config-option <key=value>` provides ordered ACP configuration defaults before prompting. Node options run after these defaults, and node `modelId` overrides global `--model`. Persistent handles pin their first settings; later omissions inherit and conflicting explicit selections fail. See [flow configuration](flows.md#model-and-session-configuration) for evidence and model-catalog limits.
 - The file is always provided by the caller at runtime. `acpx` does not require any built-in flow registry.

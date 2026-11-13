@@ -34,6 +34,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Shared runtime: `ensureSession()` no longer applies a creation-time `sessionOptions.model` to an existing persistent session, so reuse keeps its model and provider session instead of reconnecting. Thanks @saariuslystoned.
 
+- CLI: `--file` and `flow run --input-file` with a missing path or a directory now fail with `Prompt file not found: <path>` / `Flow input file not found: <path>` or `… is not a file: <path>` instead of a bare `ENOENT`, or an `EISDIR` error that names no path. Thanks @KrasimirKralev.
+
 ## 0.22.0 - 2026-11-06
 
 **Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.

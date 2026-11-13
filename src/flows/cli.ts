@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { InvalidArgumentError, type Command } from "commander";
@@ -13,6 +12,7 @@ import {
   type GlobalFlags,
   type SessionConfigOptionAssignment,
 } from "../cli/flags.js";
+import { readCliInputFile } from "../cli/input-file.js";
 import {
   resolvePermissionPolicyFromFlags,
   sessionOptionsFromGlobalFlags,
@@ -122,7 +122,7 @@ async function readFlowInput(flags: FlowRunFlags): Promise<unknown> {
 
   if (flags.inputFile !== undefined) {
     const inputPath = path.resolve(flags.inputFile);
-    const payload = await fs.readFile(inputPath, "utf8");
+    const payload = await readCliInputFile(inputPath, "Flow input file");
     return parseJsonInput(payload, "--input-file");
   }
 
