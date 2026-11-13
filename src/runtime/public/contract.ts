@@ -2,6 +2,7 @@ import type { AcpAgentRegistry } from "../../agent-registry.js";
 import type { AcpControlAuthority } from "../../async-control.js";
 export type { AcpAgentRegistry } from "../../agent-registry.js";
 import type {
+  InitializeResponse,
   SetSessionConfigOptionResponse,
   ToolCallContent,
   ToolCallLocation,
@@ -237,6 +238,9 @@ export type AcpRuntimeDoctorReport = {
   message: string;
   installCommand?: string;
   details?: string[];
+  /** Snapshot advertised during the diagnostic handshake, not inferred support. */
+  agentInfo?: InitializeResponse["agentInfo"];
+  agentCapabilities?: InitializeResponse["agentCapabilities"];
 };
 
 /**

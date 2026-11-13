@@ -131,3 +131,10 @@ of at most 2,147,483,647 milliseconds and defaults to 120 seconds. Success,
 failure, cancellation, and timeout all wait for owned client cleanup. Cleanup
 can extend beyond the discovery deadline. A pre-aborted call does not launch
 the agent.
+
+## Handshake diagnostics
+
+`runtime.doctor()` returns optional `agentInfo` and `agentCapabilities` snapshots from
+the diagnostic ACP initialize response. These describe what the agent advertised,
+not verified feature conformance. The probe does not create a session or deliver
+messages to `onAcpMessage`; failed probes omit the snapshots.

@@ -122,11 +122,13 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     private readonly options: AcpRuntimeOptions,
     private readonly testOptions?: {
       managerFactory?: (options: AcpRuntimeOptions) => AcpRuntimeManager;
-      probeRunner?: (options: AcpRuntimeOptions) => Promise<{
-        ok: boolean;
-        message: string;
-        details?: unknown[];
-      }>;
+      probeRunner?: (options: AcpRuntimeOptions) => Promise<
+        Pick<AcpRuntimeDoctorReport, "agentInfo" | "agentCapabilities"> & {
+          ok: boolean;
+          message: string;
+          details?: unknown[];
+        }
+      >;
     },
   ) {
     if (
@@ -166,6 +168,8 @@ export class AcpxRuntime implements AcpxRuntimeLike {
       code: report.ok ? undefined : "ACP_BACKEND_UNAVAILABLE",
       message: report.message,
       details: normalizeRuntimeDetails(report.details),
+      ...(report.agentInfo ? { agentInfo: report.agentInfo } : {}),
+      ...(report.agentCapabilities ? { agentCapabilities: report.agentCapabilities } : {}),
     };
   }
 

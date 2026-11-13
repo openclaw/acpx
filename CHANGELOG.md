@@ -34,6 +34,10 @@ Repo: https://github.com/openclaw/acpx
 
 - Shared runtime: `ensureSession()` no longer applies a creation-time `sessionOptions.model` to an existing persistent session, so reuse keeps its model and provider session instead of reconnecting. Thanks @saariuslystoned.
 
+### Changes
+
+- Runtime/embedding: expose advertised agent information and capabilities in handshake-only doctor reports. Thanks @MaktubCN.
+
 ## 0.22.0 - 2026-11-06
 
 **Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.
