@@ -2147,7 +2147,8 @@ export class AcpClient {
       .pop()
       ?.replace(/\.(cmd|exe|ps1)$/iu, "")
       .toLowerCase();
-    return executable === "grok" && args[0] === "agent" && args[1] === "stdio";
+    const transport = args[1] === "--no-leader" ? args[2] : args[1];
+    return executable === "grok" && args[0] === "agent" && transport === "stdio";
   }
 
   private async authenticateIfRequired(
