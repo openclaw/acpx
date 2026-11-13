@@ -65,6 +65,7 @@ export type {
   AcpProcessLaunch,
   AcpProcessLaunchScope,
   AcpProcessLifecycle,
+  AcpAgentSpawner,
   AcpProcessSpawnFailure,
   AcpProcessStarted,
   AcpRuntime,

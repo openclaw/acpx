@@ -1,3 +1,4 @@
+import type { ChildProcess, SpawnOptions } from "node:child_process";
 import type {
   AgentCapabilities,
   AnyMessage,
@@ -264,7 +265,15 @@ export type AcpProcessLifecycle = {
   onExit?: (exit: AcpProcessExit) => Promise<void> | void;
 };
 
+/** Host-owned process creation; return a newly spawned child with the requested stdio. */
+export type AcpAgentSpawner = (input: {
+  command: string;
+  args: string[];
+  options: SpawnOptions;
+}) => ChildProcess;
+
 export type AcpClientOptions = {
+  spawnAgent?: AcpAgentSpawner;
   agentCommand: string;
   agentArgv?: string[];
   /** Trusted child-only environment overlay; never persisted as session options. */

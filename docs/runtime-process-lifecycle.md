@@ -85,6 +85,25 @@ every witnessed ancestor exits before the next one. Unavailable OS process
 information leaves unverified descendants untouched. Abrupt acpx death still
 requires separate host supervision.
 
+## Customize agent process creation
+
+In-process runtimes accept `AcpRuntimeOptions.spawnAgent`, and
+`inspectAgentModels()` accepts the same option. The synchronous callback receives
+`{ command, args, options }` using Node’s `SpawnOptions`, and must return a newly
+spawned `ChildProcess`. Omitting it uses Node’s `spawn` as before.
+
+The hook covers owned ACP connections, reconnects, health probes, model inspection,
+and native compatibility/version checks. Preserve the supplied cwd, environment,
+stdio, and process-group options when wrapping `spawn`: ACP connections require
+piped stdin/stdout/stderr, whereas short native checks ignore stdin. Return the
+child immediately so ACPX can attach spawn/error observers. Lifecycle admission,
+PID tracking, and cleanup remain with ACPX. Shared runtimes reject this callback.
+The hook does not replace agent-requested terminal creation.
+
+This hook adapts
+[Paperclip’s MIT-licensed patch](https://github.com/paperclipai/paperclip/blob/ff8ec41e6a1236694d28f463b60c7d136442f9c9/patches/acpx%400.22.0.patch).
+The package includes its license and source in `THIRD_PARTY_NOTICES.md`.
+
 ## Observe session protocol messages
 
 In-process runtimes can set `AcpRuntimeOptions.onAcpMessage` to observe inbound and

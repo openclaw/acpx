@@ -1,4 +1,9 @@
-import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
+import {
+  spawn,
+  type ChildProcess,
+  type ChildProcessByStdio,
+  type SpawnOptions,
+} from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 import { pathToFileURL } from "node:url";
@@ -853,6 +858,12 @@ export class AcpClient {
     return Object.freeze({ ...launch, pid, startedAt: isoNow() });
   }
 
+  private spawnAgent(command: string, args: string[], options: SpawnOptions): ChildProcess {
+    return this.options.spawnAgent
+      ? this.options.spawnAgent({ command, args, options })
+      : spawn(command, args, options);
+  }
+
   private async spawnAgentProcess(
     plan: AgentLaunchPlan,
     authority?: AcpControlAuthority,
@@ -865,9 +876,9 @@ export class AcpClient {
     await this.options.processLifecycle?.onBeforeSpawn?.(launch);
     assertControlAuthority(authority);
 
-    let spawnedChild: ChildProcessByStdio<Writable, Readable, Readable>;
+    let spawnedChild: ChildProcess;
     try {
-      spawnedChild = spawn(launch.command, [...launch.args], {
+      spawnedChild = this.spawnAgent(launch.command, [...launch.args], {
         ...plan.spawnOptions,
         windowsVerbatimArguments: prepared.windowsVerbatimArguments,
       });
@@ -882,8 +893,15 @@ export class AcpClient {
       throw spawnError;
     }
 
-    const child = requireAgentStdio(spawnedChild);
-    this.agentDescendants.set(child, new ProcessDescendants(child));
+    this.agentDescendants.set(spawnedChild, new ProcessDescendants(spawnedChild));
+    let child: ChildProcessByStdio<Writable, Readable, Readable>;
+    try {
+      child = requireAgentStdio(spawnedChild);
+    } catch (error) {
+      this.notifyProcessSpawnFailure(launch, error);
+      await this.terminateAgentProcess(spawnedChild);
+      throw error;
+    }
     const pid = child.pid;
     if (pid === undefined) {
       const spawnError = new AgentSpawnError(
@@ -927,7 +945,7 @@ export class AcpClient {
 
     let child: ChildProcess;
     try {
-      child = spawn(launch.command, [...launch.args], {
+      child = this.spawnAgent(launch.command, [...launch.args], {
         cwd: options.cwd,
         env: options.env,
         stdio: ["ignore", "pipe", "pipe"],
