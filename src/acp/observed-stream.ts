@@ -11,6 +11,7 @@ type PromptOwner = { requestId: JsonRpcId; sessionId: string };
 
 type ObservedStreamOptions<T> = {
   onMessage: (direction: AcpMessageDirection, message: AnyMessage) => void;
+  normalizeInbound?: (message: AnyMessage) => AnyMessage;
   suppressReplaySessionUpdates: () => boolean;
   bindPromptOwner: (owner: PromptOwner) => T | undefined;
   assertPromptActive: (active: T) => void;
@@ -52,7 +53,7 @@ export function observeAcpStream<T>(
           if (isExtensionNotification(value)) {
             continue;
           }
-          controller.enqueue(value);
+          controller.enqueue(options.normalizeInbound?.(value) ?? value);
         }
       } finally {
         reader.releaseLock();

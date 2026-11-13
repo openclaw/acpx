@@ -430,6 +430,12 @@ listing it in the allowlist and leaving it off the blocklist, or pass it as an
 [`docs/runtime-environment.md`](https://github.com/openclaw/acpx/blob/main/docs/runtime-environment.md)
 and [`agents/GrokBuild.md`](https://github.com/openclaw/acpx/blob/main/agents/GrokBuild.md).
 
+## CodeBuddy permission compatibility
+
+For custom `codebuddy --acp` commands, ACPX normalizes known legacy permission
+kinds while preserving the agent’s option IDs. Unknown kinds are not guessed;
+see [the CodeBuddy guide](https://github.com/openclaw/acpx/blob/main/agents/CodeBuddy.md).
+
 ## Devin ACP compatibility
 
 The `devin` shortcut runs the installed Devin CLI. Authenticate with Devin before starting sessions:
