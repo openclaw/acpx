@@ -1124,6 +1124,68 @@ for (const method of ["load", "resume"] as const) {
   });
 }
 
+for (const method of ["load", "resume"] as const) {
+  for (const scenario of [
+    {
+      command: "openclaw acp",
+      id: "12ab3456-7890-1234-abcd-123456789abc",
+      key: "acp-bridge:12ab3456-7890-1234-abcd-123456789abc",
+    },
+    {
+      command: "openclaw acp --session agent:main:custom",
+      id: "12ab3456-7890-1234-abcd-123456789abc",
+      key: undefined,
+    },
+    {
+      command: "openclaw acp --session-label=review",
+      id: "12ab3456-7890-1234-abcd-123456789abc",
+      key: undefined,
+    },
+    {
+      command: "custom-launcher",
+      name: "openclaw-acp",
+      id: "agent:main:review",
+      key: "agent:main:review",
+    },
+  ]) {
+    test(`AcpClient OpenClaw ${method} strictly resumes ${scenario.id}`, async (t) => {
+      const fixture = createClientFixture(t, { client: { agentCommand: scenario.command } });
+      asInternals(fixture.client).initResult = {
+        agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } },
+        ...(scenario.name ? { agentInfo: { name: scenario.name, version: "test" } } : {}),
+      };
+      const cwd = path.resolve("/tmp/acpx-openclaw");
+      const pending = fixture.track(
+        method === "load"
+          ? fixture.client.loadSession(scenario.id, cwd)
+          : fixture.client.resumeSession(scenario.id, cwd),
+      );
+      const request = await fixture.message(0);
+      assert("method" in request);
+      assert.equal(request.method, "session/resume");
+      assert.deepEqual(request.params, {
+        sessionId: scenario.id,
+        cwd,
+        mcpServers: [],
+        _meta: { ...(scenario.key ? { sessionKey: scenario.key } : {}), requireExisting: true },
+      });
+      await fixture.reply(request, {});
+      await pending;
+    });
+  }
+  test(`AcpClient OpenClaw ${method} rejects agents without resume support`, async (t) => {
+    const fixture = createClientFixture(t, { client: { agentCommand: "openclaw acp" } });
+    asInternals(fixture.client).initResult = { agentCapabilities: { loadSession: true } };
+    await assert.rejects(
+      method === "load"
+        ? fixture.client.loadSession("existing")
+        : fixture.client.resumeSession("existing"),
+      /OpenClaw.*session\/resume/u,
+    );
+    assert.equal(fixture.messages.length, 0);
+  });
+}
+
 test("resolveClaudeCodeSettingSources includes user settings only when explicitly enabled", () => {
   assert.deepEqual(resolveClaudeCodeSettingSources({}), ["project", "local"]);
   assert.deepEqual(resolveClaudeCodeSettingSources({ ACPX_CLAUDE_INCLUDE_USER_SETTINGS: "1" }), [
