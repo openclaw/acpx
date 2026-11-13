@@ -554,6 +554,7 @@ test("shared ensure reuse ignores creation models; CLI ensure still applies them
 test("shared mode rejects in-process callbacks and unsupported session modes", async () => {
   await withSharedSession(async ({ runtime, handle, home }) => {
     for (const callbacks of [
+      { spawnAgent: () => undefined },
       { onPermissionRequest: () => "approve" },
       { sessionPermissions: () => ({ permissionMode: "approve-all" }) },
       { fs: false },

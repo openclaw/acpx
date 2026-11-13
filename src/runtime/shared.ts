@@ -131,6 +131,7 @@ export class SharedAcpRuntime {
       "mcpServers",
       "sessionPermissions",
       "processLifecycle",
+      "spawnAgent",
       "onPermissionRequest",
       "onAcpMessage",
       "elicitationModes",
