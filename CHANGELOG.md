@@ -8,6 +8,8 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- OpenClaw: require strict `session/resume` for existing sessions, preserve explicit gateway routing, and reject failed recovery instead of silently creating a replacement. Thanks @MaktubCN.
+
 - Sessions: keep tool result text that agents report through ACP `content` blocks when they send no `rawOutput`, so saved sessions and the embedded runtime no longer record those results as empty. Thanks @saariuslystoned.
 
 - Runtime/embedding: keep cancellation of an already-settled turn from cancelling a later turn on the same reused session client. Thanks @saariuslystoned.
