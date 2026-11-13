@@ -525,6 +525,86 @@ for (const agentName of ["antigravity-acp", "custom-agent"]) {
   }
 }
 
+for (const identity of [
+  { agentCommand: "codebuddy --acp" },
+  {
+    agentCommand: "C:\\tools\\codebuddy.cmd --acp",
+    agentArgv: ["C:\\tools\\codebuddy.cmd", "--acp"],
+  },
+  { agentName: "CodeBuddy" },
+]) {
+  for (const selected of ["allow_once", "allow_session", "deny"]) {
+    test(`CodeBuddy legacy permission kinds preserve ${selected} for ${JSON.stringify(identity)}`, async (t) => {
+      let received: RequestPermissionRequest["options"] | undefined;
+      const fixture = createClientFixture(t, {
+        client: {
+          ...identity,
+          onPermissionRequest: async (request) => {
+            received = request.raw.options;
+            return { outcome: "selected", optionId: selected };
+          },
+        },
+      });
+      if (identity.agentName) {
+        asInternals(fixture.client).initResult = {
+          agentInfo: { name: identity.agentName, version: "1.0.0" },
+        };
+      }
+      const options = [
+        { optionId: "allow_once", kind: "allow", name: "Once" },
+        { optionId: "allow_session", kind: "allow", name: "Session" },
+        { optionId: "deny", kind: "reject", name: "Deny" },
+      ];
+      await fixture.send({
+        jsonrpc: "2.0",
+        id: "legacy-permission",
+        method: "session/request_permission",
+        params: { ...makePermissionRequest("legacy", "edit"), options },
+      });
+      const response = await fixture.response("legacy-permission");
+      assert("result" in response);
+      assert.deepEqual(response.result, { outcome: { outcome: "selected", optionId: selected } });
+      assert.deepEqual(received, [
+        { ...options[0], kind: "allow_once" },
+        { ...options[1], kind: "allow_always" },
+        { ...options[2], kind: "reject_once" },
+      ]);
+      assert.equal(options[0].kind, "allow");
+    });
+  }
+}
+
+for (const scenario of [
+  { command: "some-codebuddy-wrapper --acp", optionId: "allow_once", kind: "allow" },
+  { command: "codebuddy --acp", optionId: "unknown", kind: "allow" },
+  { command: "codebuddy --acp", optionId: "deny", kind: "allow" },
+]) {
+  test(`CodeBuddy compatibility rejects unrecognized legacy permission ${JSON.stringify(scenario)}`, async (t) => {
+    let called = false;
+    const fixture = createClientFixture(t, {
+      client: {
+        agentCommand: scenario.command,
+        onPermissionRequest: async () => {
+          called = true;
+          return { outcome: "allow_once" };
+        },
+      },
+    });
+    await fixture.send({
+      jsonrpc: "2.0",
+      id: "invalid-permission",
+      method: "session/request_permission",
+      params: {
+        ...makePermissionRequest("legacy", "edit"),
+        options: [{ optionId: scenario.optionId, kind: scenario.kind, name: "Unknown" }],
+      },
+    });
+    const response = await fixture.response("invalid-permission");
+    assert("error" in response);
+    assert.equal(called, false);
+  });
+}
+
 test("AcpClient handlePermissionRequest short-circuits cancels and tracks unavailable prompts", async () => {
   const client = makeClient({
     permissionMode: "approve-reads",

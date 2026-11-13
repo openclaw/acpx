@@ -112,6 +112,7 @@ import {
   waitForSpawn,
 } from "./client-process.js";
 import { resolveClientCapabilities, resolveClientInfo } from "./client-protocol.js";
+import { normalizeCodeBuddyPermissionRequest } from "./codebuddy-compat.js";
 import { codexPermissionNotice, preferCodexPermissionRefusal } from "./codex-compat.js";
 import {
   admitCommandProbe,
@@ -1171,7 +1172,10 @@ export class AcpClient {
     readable: ReadableStream<AnyMessage>;
     writable: WritableStream<AnyMessage>;
   }): ReturnType<typeof observeAcpStream> {
+    const { command } = resolveAgentCommandParts(this.options.agentCommand, this.options.agentArgv);
     return observeAcpStream(base, {
+      normalizeInbound: (message) =>
+        normalizeCodeBuddyPermissionRequest(message, command, this.initResult?.agentInfo?.name),
       onMessage: (direction, message) => {
         this.eventHandlers.onAcpOutputMessage?.(direction, message);
         this.eventHandlers.onAcpMessage?.(direction, message);
