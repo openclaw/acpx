@@ -34,7 +34,7 @@ Repo: https://github.com/openclaw/acpx
 
 - Shared runtime: `ensureSession()` no longer applies a creation-time `sessionOptions.model` to an existing persistent session, so reuse keeps its model and provider session instead of reconnecting. Thanks @saariuslystoned.
 
-- Runtime/Antigravity: let embedding hosts explicitly answer fixed-choice questions with `onQuestionRequest`, while keeping permission approval separate and cancelling missing, invalid, or expired answers.
+- Runtime/Antigravity: let embedding hosts explicitly answer fixed-choice questions with `onQuestionRequest`, while keeping permission approval separate and cancelling missing, invalid, or expired answers. Thanks @MaktubCN.
 
 ## 0.22.0 - 2026-11-06
 
