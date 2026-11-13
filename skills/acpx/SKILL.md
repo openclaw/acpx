@@ -406,6 +406,10 @@ Ambient provider env vars such as `OPENAI_API_KEY` are still passed through to
 child agents by default, but they do not trigger ACP auth-method selection on
 their own.
 
+Grok Build’s `grok agent --no-leader stdio` variant uses the same `cached_token`
+and `XAI_API_KEY` authentication handling as `grok agent stdio`; the launch flag
+is preserved.
+
 ## Embedded environment inheritance
 
 Embedding hosts can set `agentProcessEnvAllow` or `agentProcessEnvBlock` on

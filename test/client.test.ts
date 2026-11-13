@@ -424,38 +424,61 @@ test("AcpClient keeps XAI_API_KEY scoped to Grok Build auth", async () => {
   );
 });
 
-test("AcpClient selects Grok Build cached_token as agent-managed auth", async () => {
-  await withEnv(
-    {
-      XAI_API_KEY: undefined,
-      ACPX_AUTH_CACHED_TOKEN: undefined,
-    },
-    async () => {
-      const client = makeClient({ agentCommand: "grok agent stdio" });
-      const internals = asInternals(client);
+for (const launch of [
+  { agentCommand: "grok agent stdio" },
+  { agentCommand: "grok agent --no-leader stdio" },
+  { agentCommand: "grok", agentArgv: ["/opt/bin/grok", "agent", "--no-leader", "stdio"] },
+  { agentCommand: "grok", agentArgv: ["C:\\tools\\grok.exe", "agent", "--no-leader", "stdio"] },
+]) {
+  test(`AcpClient selects Grok Build cached_token for ${JSON.stringify(launch)}`, async () => {
+    await withEnv(
+      {
+        XAI_API_KEY: undefined,
+        ACPX_AUTH_CACHED_TOKEN: undefined,
+      },
+      async () => {
+        const client = makeClient(launch);
+        const internals = asInternals(client);
 
-      const selection = internals.selectAuthMethod?.([{ id: "cached_token" }]);
-      assert.deepEqual(selection, {
-        methodId: "cached_token",
-        source: "agent",
-      });
+        const selection = internals.selectAuthMethod?.([{ id: "cached_token" }]);
+        assert.deepEqual(selection, {
+          methodId: "cached_token",
+          source: "agent",
+        });
 
-      let authenticatedMethod: string | undefined;
-      await internals.authenticateIfRequired?.(
-        {
-          agent: {
-            request: async (method: string, { methodId }: { methodId: string }) => {
-              assert.equal(method, "authenticate");
-              authenticatedMethod = methodId;
+        let authenticatedMethod: string | undefined;
+        await internals.authenticateIfRequired?.(
+          {
+            agent: {
+              request: async (method: string, { methodId }: { methodId: string }) => {
+                assert.equal(method, "authenticate");
+                authenticatedMethod = methodId;
+              },
             },
           },
-        },
-        [{ id: "cached_token" }],
-      );
+          [{ id: "cached_token" }],
+        );
 
-      assert.equal(authenticatedMethod, "cached_token");
-    },
-  );
+        assert.equal(authenticatedMethod, "cached_token");
+      },
+    );
+  });
+}
+
+test("Grok cached-token authentication remains scoped to supported ACP commands", async () => {
+  await withEnv({ ACPX_AUTH_CACHED_TOKEN: undefined }, async () => {
+    for (const agentCommand of [
+      "custom-agent agent --no-leader stdio",
+      "grok agent --no-leader chat",
+      "grok agent --unknown stdio",
+      "grok agent --model stdio",
+    ]) {
+      assert.equal(
+        asInternals(makeClient({ agentCommand })).selectAuthMethod?.([{ id: "cached_token" }]),
+        undefined,
+      );
+    }
+  });
 });
 
 test("AcpClient authenticateIfRequired throws when auth policy is fail and credentials are missing", async () => {
