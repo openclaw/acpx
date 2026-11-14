@@ -2,7 +2,11 @@ import { normalizeAgentCommandInput } from "../../acp/client-process.js";
 import { AcpClient } from "../../acp/client.js";
 import { DEFAULT_AGENT_NAME } from "../../agent-registry.js";
 import { TimeoutError } from "../../async-control.js";
-import type { AcpRuntimeOptions, AcpRuntimeSessionModels } from "./contract.js";
+import type {
+  AcpRuntimeOptions,
+  AcpRuntimeSessionModels,
+  AcpSessionRequestMeta,
+} from "./contract.js";
 
 export type RuntimeHealthReport = {
   ok: boolean;
@@ -15,6 +19,8 @@ export type ProbeRuntimeDeps = {
 };
 
 export type InspectAgentModelsOptions = {
+  /** Transient metadata for the discovery session; same contract as AcpRuntimeOptions. */
+  sessionRequestMeta?: AcpSessionRequestMeta;
   agentCommand: string[];
   cwd: string;
   signal?: AbortSignal;
@@ -48,6 +54,7 @@ export async function inspectAgentModels(
   const client = new AcpClient({
     ...normalizeAgentCommandInput(options.agentCommand),
     cwd: options.cwd,
+    sessionRequestMeta: options.sessionRequestMeta,
     agentProcessEnv: options.agentProcessEnv,
     agentProcessEnvAllow: options.agentProcessEnvAllow,
     agentProcessEnvBlock: options.agentProcessEnvBlock,
@@ -203,6 +210,7 @@ function createProbeClient(
   const clientOptions = {
     ...agentCommand,
     cwd: options.cwd,
+    sessionRequestMeta: options.sessionRequestMeta,
     agentProcessEnv: options.agentProcessEnv,
     agentProcessEnvAllow: options.agentProcessEnvAllow,
     agentProcessEnvBlock: options.agentProcessEnvBlock,

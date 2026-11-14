@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Changes
+
+- Runtime/embedding: add transient `sessionRequestMeta` for validated agent-specific metadata on new, loaded, and resumed sessions without saving host policy in session records. Thanks @MaktubCN.
+
 ### Fixes
 
 - Sessions: keep tool result text that agents report through ACP `content` blocks when they send no `rawOutput`, so saved sessions and the embedded runtime no longer record those results as empty. Thanks @saariuslystoned.
