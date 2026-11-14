@@ -141,12 +141,30 @@ function extractFencedJsonText(text: string): string | null {
     contentStart += 1;
   }
 
-  const closingFenceIndex = text.indexOf("```", contentStart);
+  const closingFenceIndex = findClosingJsonFence(text, contentStart);
   if (closingFenceIndex === -1) {
     return null;
   }
 
   return text.slice(contentStart, closingFenceIndex).trim();
+}
+
+function findClosingJsonFence(text: string, contentStart: number): number {
+  let inString = false;
+  let escaped = false;
+  for (let index = contentStart; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      const next = scanStringChar(char, escaped);
+      escaped = next.escaped;
+      inString = next.inString;
+    } else if (char === '"') {
+      inString = true;
+    } else if (text.startsWith("```", index)) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function isFenceWhitespace(char: string | undefined): boolean {

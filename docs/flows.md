@@ -30,7 +30,7 @@ acpx --timeout 1800 flow run ./my-flow.ts
 
 What happens:
 
-- The runtime loads the flow module from disk.
+- The runtime loads the flow module from disk. A path that does not exist or is not a file fails with `Flow file not found: <path>` or `Flow file is not a file: <path>` before a run directory is created.
 - A run id is generated and a run directory is created at `~/.acpx/flows/runs/<runId>/`.
 - Steps execute in topological order. ACP steps reuse one implicit main session by default.
 - Run state (graph, ACP transcripts, artifacts, errors) is persisted as the run progresses.
@@ -60,7 +60,9 @@ helper throws the usual `Could not parse JSON` error. Prefer direct or fenced
 JSON when recovery must not depend on surrounding prose; those parsing paths
 are unaffected by the compatibility recovery budget. Use
 `parseStrictJsonObject(text)` to require direct JSON, or `mode: "fenced"` to
-accept direct JSON and fenced blocks without embedded recovery.
+accept direct JSON and fenced blocks without embedded recovery. Literal triple
+backticks inside JSON strings do not close the surrounding fence, including
+when those strings contain escaped quotes or backslashes.
 
 ## Node types
 
@@ -164,7 +166,7 @@ acp({
 
 Global `--model` and repeatable `flow run --config-option <key=value>` provide run defaults. Library callers use `FlowRunnerOptions.sessionOptions.model` and `FlowRunnerOptions.configOptions`. A node's `modelId` overrides the default; other global session options still apply. The legacy passthrough `model` field remains inert extension metadata and never selects a model. Run config options execute first, then node options in array order, including repeated IDs. Option IDs and values in flow definitions are opaque strings and are not normalized. A model-related config option executes after model selection and may change the final model.
 
-For persistent sessions, the first binding pins the effective settings. Later omitted fields inherit that binding; explicit fields must match its requested model or final option values. Use a distinct `session.handle` for different settings. Reconnecting loads the same ACP session, reapplies the pinned selections, and fails before prompting if they cannot be restored. Isolated sessions apply their own settings independently. Selection rejection or timeout prevents the prompt.
+For persistent sessions, the first binding pins the effective settings. Later omitted fields inherit that binding; explicit fields must match its requested model or final option values. Use a distinct `session.handle` for different settings. Reconnecting loads the same ACP session, reapplies the pinned selections, and fails before prompting if they cannot be restored. This also applies when the initial connection ends after configuration but before the first prompt. Isolated sessions apply their own settings independently. Selection rejection or timeout prevents the prompt.
 
 When a model or config option was requested, bindings in the run bundle include `requestedSettings` and `acceptedSettings`; step session snapshots carry the same evidence. The `flow run --format json` result prints session bindings without these fields; read them from the run bundle. Model evidence distinguishes the requested ID, whether ACP model selection was applied, and the accepted final ID. Without an advertised model catalog, adapters with supported startup-model behavior retain that behavior and report `applied: false`; other adapters reject the model request. Option evidence records each acknowledged `acceptedValue` and a `reported` boolean: `true` means the value came from the adapter reply catalog; `false` means the reply acknowledged the request without reporting a value, so `acceptedValue` echoes the resolved request. These acknowledgements are configuration evidence; inspect adapter prompt-response metadata for provider usage attestation.
 

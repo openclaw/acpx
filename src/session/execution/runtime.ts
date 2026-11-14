@@ -1106,11 +1106,18 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
 
   const runPrompt = async (): Promise<SessionSendResult> => {
     options.ownedSignal?.throwIfAborted();
-    const { sessionId: activeSessionId, resumed, loadError } = await connectForPrompt();
+    const {
+      sessionId: activeSessionId,
+      resumed,
+      loadError,
+      reusingLoadedSession,
+    } = await connectForPrompt();
     options.ownedSignal?.throwIfAborted();
 
     try {
-      await applyPromptConfiguration(client, activeSessionId, record, options);
+      if (!options.skipConfigurationForLoadedSession || !reusingLoadedSession) {
+        await applyPromptConfiguration(client, activeSessionId, record, options);
+      }
     } catch (error) {
       if (error instanceof TimeoutError) {
         // A late model acknowledgement can change the adapter after this turn fails.
@@ -1490,6 +1497,7 @@ export async function sendSessionDirect(
       suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
       verbose: options.verbose,
       client: options.client,
+      skipConfigurationForLoadedSession: options.skipConfigurationForLoadedSession,
       sessionOptions: options.sessionOptions,
       configOptions: options.configOptions,
       onSessionConfigured: options.onSessionConfigured,

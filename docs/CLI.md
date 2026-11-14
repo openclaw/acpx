@@ -69,6 +69,7 @@ Notes:
 - Top-level `flow run <file>` executes a user-authored workflow module and persists run state under `~/.acpx/flows/runs/`.
 - If a prompt argument is omitted, `acpx` reads prompt text from stdin when piped.
 - `--file` works for implicit prompt, `prompt`, and `exec` commands.
+- A `--file` path that does not exist or is a directory fails with `Prompt file not found: <path>` or `Prompt file is not a file: <path>` (exit 1) before any agent starts.
 - After an agent name, `--file` may appear before or after `prompt`/`exec`; an explicit value on the subcommand wins. `--no-wait` works before or after `prompt`, and omission still waits normally.
 - `acpx` with no args in an interactive terminal shows help.
 
@@ -85,7 +86,7 @@ acpx [global_options] flow run <file> [--input-json <json> | --input-file <path>
 - `acp` and `action` nodes use the global `--timeout` value as their default step timeout. If `--timeout` is omitted, flows default to 15 minutes per active step.
 - Flows may declare permission requirements. If a flow requires an explicit grant such as `approve-all`, `acpx` fails fast before starting the flow and tells you which permission flag to pass.
 - `--input-json` passes flow input inline as JSON.
-- `--input-file` reads flow input JSON from disk.
+- `--input-file` reads flow input JSON from disk; a path that does not exist or is a directory fails with `Flow input file not found: <path>` or `Flow input file is not a file: <path>`.
 - `--default-agent` supplies the default agent profile for `acp` nodes that do not pin one.
 - Repeatable `--config-option <key=value>` provides ordered ACP configuration defaults before prompting. Node options run after these defaults, and node `modelId` overrides global `--model`. Persistent handles pin their first settings; later omissions inherit and conflicting explicit selections fail. See [flow configuration](flows.md#model-and-session-configuration) for evidence and model-catalog limits.
 - The file is always provided by the caller at runtime. `acpx` does not require any built-in flow registry.
@@ -398,6 +399,7 @@ Behavior:
 - `sessions watch [-s <name>] [--cursor <cursor>]` replays retained events and follows new ones without affecting the active turn; see [Watching sessions](session-watch.md)
 - Watch inherits the agent's `-s`/`--session` selection unless its own `-s`/`--name` is set. Its journal cursor comes only from `watch --cursor`, independently of the list pagination cursor on `sessions`.
 - `sessions export [name] --output <path>` writes a portable JSON archive with session state and event history; `--cwd <dir>` selects a different source cwd relative to global `--cwd`
+- Export refuses active sessions or a session checkpoint that changes during history capture, leaving any existing output file untouched; close the source session and retry
 - `sessions import <archive>` writes a fresh local record from a portable archive, reopens it as idle, keeps the provider session id, and clears source-machine process metadata
 - Imported sessions must resume that provider session; if the destination agent cannot load it, prompts fail clearly instead of starting an empty conversation
 - `sessions import --name <name>` and `--cwd <dir>` override the imported destination scope; import fails instead of creating a duplicate when an active session already exists for that `(agent, cwd, name)` scope or when another local record already uses the same provider session id

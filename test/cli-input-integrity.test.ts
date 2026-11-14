@@ -209,3 +209,22 @@ for (const linkType of ["symlink", "hardlink"] as const) {
     },
   );
 }
+
+test("--file names a missing or non-file prompt path for exec, prompt and compare", async () => {
+  await fixture(async (home, execute) => {
+    await fs.mkdir(path.join(home, "dir.md"));
+    await fs.writeFile(path.join(home, "file.md"), "hi");
+    for (const command of [["exec"], ["prompt"], ["compare", "codex", "claude"]]) {
+      for (const [target, message] of [
+        ["missing.md", "Prompt file not found"],
+        [path.join("file.md", "nested.md"), "Prompt file not found"],
+        ["dir.md", "Prompt file is not a file"],
+      ]) {
+        const result = await execute(["--format", "json", ...command, "--file", target]);
+        assert.equal(result.code, 1, `${command[0]} ${target}: ${result.stderr}`);
+        const envelope = JSON.parse(result.stdout.trim()) as { error: { message: string } };
+        assert.equal(envelope.error.message, `${message}: ${path.join(home, target)}`);
+      }
+    }
+  });
+});

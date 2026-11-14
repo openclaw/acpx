@@ -165,6 +165,11 @@ export class JsonMessageSanitizer {
     if (!idKey) {
       return;
     }
+    // Watch replays both directions without a direction tag. A later method on
+    // the same id must not forget an in-flight read, or the file body is shown.
+    if (this.requestMethodById.get(idKey) === "fs/read_text_file") {
+      return;
+    }
     this.requestMethodById.set(idKey, candidate.method);
   }
 

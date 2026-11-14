@@ -35,6 +35,14 @@ its observed processes. The error identifies the stalled phase. Cleanup can
 extend beyond the deadline. Omitting the timeout or setting it to zero preserves
 unlimited setup. A failed explicit resume does not create a replacement session.
 
+Runtime construction rejects finite default `timeoutMs` values above 2,147,483,647
+with `ACP_INVALID_RUNTIME_OPTION`, before session or agent work. The same bound
+applies to per-turn overrides: `startTurn()` throws synchronously, and `runTurn()`
+rejects when iteration starts, before prompt dispatch. Each turn uses the timeout
+value read at admission. The bound applies to raw milliseconds, including
+fractional overflow; supported values and existing omitted or zero behavior
+remain unchanged. An omitted override continues to inherit the runtime default.
+
 The host owns admission timeouts, cancellation and recovery. A callback that never
 settles can hold startup indefinitely; `close()` is not an admission-cancellation
 mechanism. Hosts should bound their own storage or policy operations and settle

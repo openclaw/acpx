@@ -1,4 +1,3 @@
-import fs from "node:fs/promises";
 import path from "node:path";
 import { text } from "node:stream/consumers";
 import { InvalidArgumentError } from "commander";
@@ -9,6 +8,7 @@ import {
   textPrompt,
   type PromptInput,
 } from "../prompt-content.js";
+import { readCliInputFile } from "./input-file.js";
 
 export async function readPromptInput(
   filePath: string | undefined,
@@ -51,7 +51,7 @@ async function readPromptFile(
   const source =
     filePath === "-"
       ? await text(process.stdin)
-      : await fs.readFile(path.resolve(cwd, filePath), "utf8");
+      : await readCliInputFile(path.resolve(cwd, filePath), "Prompt file");
   const prompt = mergePromptSourceWithText(source, promptText);
   if (prompt.length === 0) {
     throw new InvalidArgumentError("Prompt from --file is empty");

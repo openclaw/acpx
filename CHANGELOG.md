@@ -36,6 +36,16 @@ Repo: https://github.com/openclaw/acpx
 
 - Dependencies: update the guarded filesystem runtime, Commander, and development tools while retaining the ACP SDK 1.x line and existing security overrides.
 
+- Sessions/export: reject archives when session ownership or the saved checkpoint changes during capture, preserving existing output files. Thanks @saariuslystoned.
+- Flows: reapply and verify pinned model and configuration choices when the initial connection dies before the first prompt. Thanks @saariuslystoned.
+- Output: skip malformed embedded resource metadata without losing later text or completion events. Thanks @saariuslystoned.
+- Flows/JSON: preserve literal backticks inside fenced JSON strings and keys. Thanks @saariuslystoned.
+- Runtime: reject overflowing in-process timeouts and shared-session idle TTLs before admitting session work. Thanks @saariuslystoned.
+- Shared sessions: retain each turn's request identity when callers reuse the input object, so cancellation targets the original turn. Thanks @saariuslystoned.
+- Sessions/watch: keep read contents suppressed when opposite-direction requests reuse an RPC ID. Thanks @saariuslystoned.
+- Sessions/list: preserve accepted opaque pagination cursors without trimming them. Thanks @saariuslystoned.
+- CLI: identify missing or non-file prompt, flow, and flow-input paths while preserving exit codes and JSON error envelopes. Thanks @KrasimirKralev.
+
 ## 0.22.0 - 2026-11-06
 
 **Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.
