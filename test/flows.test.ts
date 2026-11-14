@@ -193,6 +193,66 @@ test("parseJsonObject parses fenced JSON without regex backtracking", () => {
   assert.throws(() => parseJsonObject("```json\n", { mode: "fenced" }), /Could not parse JSON/);
 });
 
+for (const value of [
+  { message: "literal ``` and ```` fences", ok: true },
+  { "key```": 'escaped " before ``` and " after' },
+  { message: "backslash \\ before ```", tail: "\\" },
+  { message: 'backslash quote \\" before ```' },
+  ["```", { nested: "```" }],
+  "```",
+]) {
+  test(`parseJsonObject preserves fenced JSON string content ${JSON.stringify(value)}`, () => {
+    const json = JSON.stringify(value);
+    for (const opener of ["```json\n", "```JSON\r\n", "```\n"]) {
+      const fenced = opener + json + "\n```";
+      assert.deepEqual(parseJsonObject(fenced, { mode: "fenced" }), value);
+      assert.deepEqual(parseJsonObject(fenced), value);
+      assert.deepEqual(parseJsonObject(json, { mode: "strict" }), value);
+      assert.throws(() => parseJsonObject(fenced, { mode: "strict" }), /Could not parse JSON/);
+    }
+  });
+}
+
+test("parseJsonObject requires a closing fence outside a complete JSON string", () => {
+  for (const text of [
+    '```json\n{"message":"```"}',
+    '```json\n{"message":"unterminated ```\n```',
+    '```json\n{"message":"```",}\n```',
+    '```json\n{"ok":true} trailing "quote"\n```',
+  ]) {
+    assert.throws(() => parseJsonObject(text, { mode: "fenced" }), /Could not parse JSON/);
+  }
+  assert.deepEqual(
+    parseJsonObject('```json\n{"first":true}\n```\n{"second":true}', { mode: "fenced" }),
+    { first: true },
+  );
+});
+
+test("fenced JSON scanning stays bounded with repeated literal fences", () => {
+  const parserUrl = new URL("../src/flows/json.js", import.meta.url).href;
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+    import assert from 'node:assert/strict';
+    import { parseJsonObject } from ${JSON.stringify(parserUrl)};
+    const fence = String.fromCharCode(96).repeat(3);
+    const value = { text: (fence + String.fromCharCode(34, 92)).repeat(100_000) };
+    const text = fence + 'json' + String.fromCharCode(10) + JSON.stringify(value);
+    assert.deepEqual(parseJsonObject(text + String.fromCharCode(10) + fence, { mode: 'fenced' }), value);
+    assert.throws(() => parseJsonObject(text, { mode: 'fenced' }), /Could not parse JSON/);
+    process.stdout.write('bounded');
+  `,
+    ],
+    { encoding: "utf8", timeout: 5_000 },
+  );
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "bounded");
+});
+
 test("createRunId slugifies flow names without regex backtracking", () => {
   assert.match(
     createRunId("  Publish: BIG Result!!!  "),
@@ -3033,6 +3093,96 @@ for (const isolated of [false, true]) {
       );
     });
   });
+}
+
+for (const drift of ["none", "model", "option"] as const) {
+  test(
+    "flow settings: first-prompt reconnect preserves pinned settings (" + drift + ")",
+    async (t) => {
+      await withTempHome(async (home) => {
+        const log = path.join(home, "requests.ndjson");
+        let reconnecting = false;
+        const originalLoad = AcpClient.prototype.loadSessionWithOptions;
+        t.mock.method(
+          AcpClient.prototype,
+          "loadSessionWithOptions",
+          async function (
+            this: AcpClient,
+            ...args: Parameters<AcpClient["loadSessionWithOptions"]>
+          ) {
+            reconnecting = true;
+            return await originalLoad.apply(this, args);
+          },
+        );
+        const originalSet = AcpClient.prototype.setSessionConfigOption;
+        t.mock.method(
+          AcpClient.prototype,
+          "setSessionConfigOption",
+          async function (
+            this: AcpClient,
+            ...args: Parameters<AcpClient["setSessionConfigOption"]>
+          ) {
+            const response = await originalSet.apply(this, args);
+            if (!reconnecting) {
+              if (args[1] === "reasoning_effort") {
+                // Lose the configured initial connection before its first prompt.
+                await this.close();
+              }
+              return response;
+            }
+            return {
+              ...response,
+              configOptions: response.configOptions?.map((option) =>
+                drift !== "none" && option.id === (drift === "model" ? "model" : "reasoning_effort")
+                  ? Object.assign({}, option, {
+                      currentValue: drift === "model" ? "smart-model" : "low",
+                    })
+                  : option,
+              ),
+            };
+          },
+        );
+        const runner = new FlowRunner({
+          resolveAgent: () => ({
+            agentName: "mock",
+            agentCommand:
+              MOCK_AGENT_COMMAND + " --advertise-config-options --supports-load-session",
+            cwd: home,
+          }),
+          permissionMode: "deny-all",
+          outputRoot: path.join(home, "runs"),
+          sessionOptions: { env: { ACPX_TEST_REQUEST_LOG: log } },
+        });
+        const run = runner.run(
+          defineFlow({
+            name: "first-prompt-reconnect",
+            startAt: "ask",
+            nodes: {
+              ask: acp({
+                modelId: "fast-model",
+                configOptions: [{ configId: "reasoning_effort", value: "high" }],
+                prompt: () => "echo first",
+              }),
+            },
+            edges: [],
+          }),
+          {},
+        );
+        if (drift === "none") {
+          assert.equal((await run).state.status, "completed");
+        } else {
+          await assert.rejects(run, /Cannot replay pinned/);
+        }
+        const requests = await readFlowRequests(log);
+        assert.equal(requests.filter((entry) => entry.method === "session/new").length, 1);
+        assert.equal(requests.filter((entry) => entry.method === "session/load").length, 1);
+        assert.equal(
+          requests.filter((entry) => entry.method === "session/prompt").length,
+          drift === "none" ? 1 : 0,
+        );
+      });
+    },
+  );
 }
 
 test("flow settings: reconnect cannot silently drop the pinned model", async (t) => {

@@ -109,6 +109,8 @@ export type SessionSendOptions = {
   ttlMs?: number;
   maxQueueDepth?: number;
   client?: AcpClient;
+  /** A configured initial client needs these selections only if it reconnects. */
+  skipConfigurationForLoadedSession?: boolean;
   promptRetries?: number;
   sessionOptions?: SessionAgentOptions;
 } & SessionConnectionOptions;

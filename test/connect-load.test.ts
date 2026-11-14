@@ -136,6 +136,7 @@ test("connectAndLoadSession prefers session/resume for resume-capable sessions",
     });
 
     assert.deepEqual(result, {
+      reusingLoadedSession: false,
       sessionId: "resume-session",
       agentSessionId: "runtime-session",
       resumed: true,
@@ -205,6 +206,7 @@ test("connectAndLoadSession resumes an existing load-capable session", async () 
     });
 
     assert.deepEqual(result, {
+      reusingLoadedSession: false,
       sessionId: "resume-session",
       agentSessionId: "runtime-session",
       resumed: true,
@@ -1841,6 +1843,7 @@ test("connectAndLoadSession reuses an already loaded client session", async () =
 
     assert.equal(started, false);
     assert.equal(loaded, false);
+    assert.equal(result.reusingLoadedSession, true);
     assert.equal(result.resumed, true);
     assert.equal(result.sessionId, "reused-session");
     assert.equal(record.pid, 888);

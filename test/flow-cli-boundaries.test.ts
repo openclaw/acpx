@@ -143,3 +143,66 @@ test("flow run rejects empty input arguments instead of running with default inp
     }
   });
 });
+
+test("flow run names a missing or non-file flow path instead of a module loader error", async () => {
+  await withTempHome("acpx-flow-path-", async (home) => {
+    await fs.mkdir(path.join(home, "dir.ts"));
+    await fs.writeFile(path.join(home, "file.ts"), "");
+    const cwd = await fs.realpath(home);
+    for (const [target, message] of [
+      ["missing.ts", "Flow file not found"],
+      ["missing.mjs", "Flow file not found"],
+      [path.join("file.ts", "nested.ts"), "Flow file not found"],
+      ["dir.ts", "Flow file is not a file"],
+    ]) {
+      const flowPath = path.join(cwd, target);
+      const result = spawnSync(process.execPath, [CLI, "--format", "json", "flow", "run", target], {
+        cwd: home,
+        encoding: "utf8",
+        timeout: 15_000,
+        env: { ...process.env, HOME: home, USERPROFILE: home },
+      });
+      assert.equal(result.status, 1, `${target}: ${result.stderr}`);
+      const envelope = JSON.parse(result.stdout.trim()) as { error: { message: string } };
+      assert.equal(envelope.error.message, `${message}: ${flowPath}`);
+      await assert.rejects(fs.access(path.join(home, ".acpx", "flows", "runs")), {
+        code: "ENOENT",
+      });
+    }
+  });
+});
+
+test("flow run names a missing or non-file --input-file path", async () => {
+  await withTempHome("acpx-flow-input-path-", async (home) => {
+    const cwd = await fs.realpath(home);
+    const entry = path.join(cwd, "entry.mjs");
+    await fs.mkdir(path.join(cwd, "dir.json"));
+    await fs.writeFile(path.join(cwd, "file.json"), "{}");
+    await fs.writeFile(
+      entry,
+      'import {defineFlow, compute} from "acpx/flows"; export default defineFlow({name:"input",startAt:"read",nodes:{read:compute({run: ({input}) => input})},edges:[]});',
+    );
+    for (const [target, message] of [
+      ["missing.json", "Flow input file not found"],
+      [path.join("file.json", "nested.json"), "Flow input file not found"],
+      ["dir.json", "Flow input file is not a file"],
+    ]) {
+      const result = spawnSync(
+        process.execPath,
+        [CLI, "--format", "json", "flow", "run", entry, "--input-file", target],
+        {
+          cwd,
+          encoding: "utf8",
+          timeout: 15_000,
+          env: { ...process.env, HOME: home, USERPROFILE: home },
+        },
+      );
+      assert.equal(result.status, 1, `${target}: ${result.stderr}`);
+      const envelope = JSON.parse(result.stdout.trim()) as { error: { message: string } };
+      assert.equal(envelope.error.message, `${message}: ${path.join(cwd, target)}`);
+      await assert.rejects(fs.access(path.join(home, ".acpx", "flows", "runs")), {
+        code: "ENOENT",
+      });
+    }
+  });
+});
