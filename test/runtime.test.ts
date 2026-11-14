@@ -1237,3 +1237,94 @@ for (const turnCount of [0, 1, 2]) {
     assert.equal((await turn.result).status, "completed");
   });
 }
+
+type LoggedSessionRequest = {
+  pid: number;
+  method?: string;
+  params?: { _meta?: { claudeCode?: { options?: Record<string, unknown> } } };
+};
+
+for (const scenario of [
+  { label: "a supplied deny list", disallowedTools: ["Bash", "WebFetch"] },
+  { label: "an explicit empty deny list", disallowedTools: [] as string[] },
+  { label: "an omitted deny list", disallowedTools: undefined },
+]) {
+  test(`public Claude sessions forward and retain ${scenario.label} through cold reconnect`, async (t) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-disallowed-tools-"));
+    const requestLog = path.join(cwd, "requests.jsonl");
+    const store = createFileSessionStore({ stateDir: path.join(cwd, "state") });
+    const options = {
+      cwd,
+      sessionStore: store,
+      agentRegistry: createAgentRegistry({
+        overrides: {
+          fixture: [
+            process.execPath,
+            MOCK_AGENT_PATH,
+            "--supports-load-session",
+            "--claude-agent-acp",
+          ],
+        },
+      }),
+      permissionMode: "approve-reads" as const,
+      agentProcessEnv: { ACPX_TEST_REQUEST_LOG: requestLog },
+    };
+    let runtime = createAcpRuntime(options);
+    t.after(async () => {
+      await runtime.shutdown();
+      await fs.rm(cwd, { recursive: true, force: true });
+    });
+    const input = { sessionKey: "deny-list", agent: "fixture", mode: "persistent" as const };
+    const created = await runtime.ensureSession({
+      ...input,
+      ...(scenario.disallowedTools
+        ? { sessionOptions: { disallowedTools: scenario.disallowedTools } }
+        : {}),
+    });
+    const recordId = created.acpxRecordId ?? created.sessionKey;
+    assert.deepEqual(
+      (await store.load(recordId))?.acpx?.session_options?.disallowed_tools,
+      scenario.disallowedTools,
+    );
+
+    // A new runtime only has the saved record; the caller does not resupply options.
+    await runtime.shutdown();
+    runtime = createAcpRuntime(options);
+    const resumed = await runtime.ensureSession(input);
+    assert.equal(resumed.backendSessionId, created.backendSessionId);
+    const turn = runtime.startTurn({
+      handle: resumed,
+      text: "echo resumed",
+      mode: "prompt",
+      requestId: "deny-list-resumed",
+    });
+    for await (const event of turn.events) {
+      assert.notEqual(event.type, "error");
+    }
+    assert.equal((await turn.result).status, "completed");
+
+    const sessionRequests = (await fs.readFile(requestLog, "utf8"))
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as LoggedSessionRequest)
+      .filter((request) => request.method === "session/new" || request.method === "session/load");
+    assert.deepEqual(
+      sessionRequests.map((request) => request.method),
+      ["session/new", "session/load"],
+    );
+    assert.notEqual(sessionRequests[0]?.pid, sessionRequests[1]?.pid);
+    for (const request of sessionRequests) {
+      const claudeOptions = request.params?._meta?.claudeCode?.options;
+      assert.ok(claudeOptions, `${request.method} must carry Claude options`);
+      assert.equal(
+        Object.hasOwn(claudeOptions, "disallowedTools"),
+        scenario.disallowedTools !== undefined,
+      );
+      assert.deepEqual(claudeOptions.disallowedTools, scenario.disallowedTools);
+    }
+    assert.deepEqual(
+      (await store.load(recordId))?.acpx?.session_options?.disallowed_tools,
+      scenario.disallowedTools,
+    );
+  });
+}

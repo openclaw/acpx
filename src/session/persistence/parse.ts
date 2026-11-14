@@ -525,6 +525,7 @@ function assignParsedSessionOptions(state: SessionAcpxState, raw: unknown): void
   if (isStringArray(sessionOptions.allowed_tools)) {
     parsedSessionOptions.allowed_tools = [...sessionOptions.allowed_tools];
   }
+  assignSessionOptionDisallowedTools(parsedSessionOptions, sessionOptions.disallowed_tools);
   if (isPositiveInteger(sessionOptions.max_turns)) {
     parsedSessionOptions.max_turns = sessionOptions.max_turns;
   }
@@ -536,6 +537,15 @@ function assignParsedSessionOptions(state: SessionAcpxState, raw: unknown): void
 
   if (Object.keys(parsedSessionOptions).length > 0) {
     state.session_options = parsedSessionOptions;
+  }
+}
+
+function assignSessionOptionDisallowedTools(
+  options: NonNullable<SessionAcpxState["session_options"]>,
+  value: unknown,
+): void {
+  if (isStringArray(value)) {
+    options.disallowed_tools = [...value];
   }
 }
 

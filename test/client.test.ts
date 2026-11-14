@@ -1049,6 +1049,23 @@ for (const scenario of [
     },
   },
   {
+    name: "AcpClient createSession forwards a Claude tool deny list in _meta",
+    options: {
+      agentCommand: "npx -y @agentclientprotocol/claude-agent-acp",
+      sessionOptions: { disallowedTools: ["Bash", "WebFetch"] },
+    },
+    meta: {
+      claudeCode: {
+        options: { settingSources: ["project", "local"], disallowedTools: ["Bash", "WebFetch"] },
+      },
+    },
+  },
+  {
+    name: "AcpClient createSession forwards an explicit empty Claude tool deny list in _meta",
+    options: { sessionOptions: { disallowedTools: [] } },
+    meta: { claudeCode: { options: { disallowedTools: [] } } },
+  },
+  {
     name: "AcpClient creates built-in Claude sessions without user settings by default",
     options: { agentCommand: "npx -y @agentclientprotocol/claude-agent-acp" },
     meta: { claudeCode: { options: { settingSources: ["project", "local"] } } },
@@ -1096,7 +1113,12 @@ for (const method of ["load", "resume"] as const) {
     const fixture = createClientFixture(t, {
       client: {
         agentCommand: "npx -y @agentclientprotocol/claude-agent-acp",
-        sessionOptions: { allowedTools: ["Read"], maxTurns: 5, systemPrompt: "synthetic" },
+        sessionOptions: {
+          allowedTools: ["Read"],
+          disallowedTools: ["Bash"],
+          maxTurns: 5,
+          systemPrompt: "synthetic",
+        },
       },
     });
     const cwd = path.resolve("/tmp/acpx-client-meta");
@@ -1114,7 +1136,12 @@ for (const method of ["load", "resume"] as const) {
       mcpServers: [],
       _meta: {
         claudeCode: {
-          options: { settingSources: ["project", "local"], allowedTools: ["Read"], maxTurns: 5 },
+          options: {
+            settingSources: ["project", "local"],
+            allowedTools: ["Read"],
+            disallowedTools: ["Bash"],
+            maxTurns: 5,
+          },
         },
         systemPrompt: "synthetic",
       },
