@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { setImmediate as nextTurn } from "node:timers/promises";
-import type { SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
+import { RequestError, type SetSessionConfigOptionResponse } from "@agentclientprotocol/sdk";
 import type { SessionModelState } from "../src/acp/model-support.js";
 import { AcpxOperationalError } from "../src/errors.js";
 import { AcpRuntimeManager } from "../src/runtime/engine/manager.js";
@@ -20,6 +20,7 @@ import type {
   AcpRuntimeTurn,
   AcpRuntimeTurnResult,
 } from "../src/runtime/public/contract.js";
+import { AcpRuntimeError } from "../src/runtime/public/errors.js";
 import {
   createRuntimeOptions,
   InMemorySessionStore,
@@ -162,6 +163,204 @@ test("AcpRuntimeManager reuses compatible records without spawning a new client"
   assert.equal(record.closed, false);
   assert.equal(store.savedRecordIds.length, 1);
 });
+
+function createConnectSessionFixture(
+  t: TestContext,
+  options: {
+    load?: () => Promise<void>;
+    close?: () => Promise<void>;
+    save?: (record: AcpSessionRecord) => Promise<void>;
+  } = {},
+) {
+  const record = makeSessionRecord({
+    acpxRecordId: "connect-record",
+    acpSessionId: "original-backend",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+    acpx: { session_origin: "new" },
+  });
+  const store = new InMemorySessionStore([record]);
+  const saved: AcpSessionRecord[] = [];
+  const events: string[] = [];
+  const configOptions = (currentValue: string) =>
+    [
+      {
+        id: "effort",
+        name: "Effort",
+        type: "select",
+        currentValue,
+        options: ["low", "high"].map((value) => ({ value, name: value })),
+      },
+    ] satisfies SetSessionConfigOptionResponse["configOptions"];
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({
+      cwd: record.cwd,
+      sessionStore: {
+        load: (id) => store.load(id),
+        async save(next) {
+          await options.save?.(next);
+          saved.push(structuredClone(next));
+          await store.save(next);
+        },
+      },
+    }),
+    {
+      clientFactory: () => {
+        let loaded = false;
+        let running = false;
+        events.push("construct");
+        return {
+          start: async () => {
+            running = true;
+          },
+          close: async () => {
+            if (running) {
+              events.push("close");
+              await options.close?.();
+              loaded = false;
+              running = false;
+            }
+          },
+          createSession: async () => {
+            events.push("new");
+            return { sessionId: "replacement" };
+          },
+          supportsResumeSession: () => false,
+          supportsLoadSession: () => true,
+          loadSessionWithOptions: async (sessionId, _cwd, { suppressReplayUpdates }) => {
+            assert.equal(sessionId, record.acpSessionId);
+            assert.equal(suppressReplayUpdates, true);
+            events.push("load");
+            await options.load?.();
+            loaded = true;
+            return {
+              agentSessionId: undefined,
+              configOptions: configOptions("low"),
+              configOptionsPresent: true,
+            };
+          },
+          hasReusableSession: (sessionId) => loaded && sessionId === record.acpSessionId,
+          getAgentLifecycleSnapshot: () => ({ running, pid: running ? 1234 : undefined }),
+          prompt: async () => {
+            throw new Error("Unexpected prompt");
+          },
+          hasActivePrompt: () => false,
+          requestCancelActivePrompt: async () => false,
+          setSessionMode: async () => {},
+          setSessionConfigOption: async (_sessionId, _id, value) => {
+            events.push(`write:${value}`);
+            return { configOptions: configOptions(value) };
+          },
+          setEventHandlers: () => {},
+          clearEventHandlers: () => {},
+        } satisfies Omit<FakeClient, "loadSession"> as never;
+      },
+    },
+  );
+  t.after(() => manager.shutdown());
+  return { manager, record, store, saved, events, handle: createHandle(record.acpxRecordId) };
+}
+
+test("AcpRuntimeManager reuses the connection and checkpoints each dependent control", async (t) => {
+  const { manager, handle, record, saved, events } = createConnectSessionFixture(t);
+  await Promise.all([
+    manager.connectSession(handle, "persistent"),
+    manager.connectSession(handle, "persistent"),
+  ]);
+  assert.equal(saved.length, 1);
+  assert.deepEqual(saved[0]?.messages, record.messages);
+  assert.equal(saved[0]?.acpSessionId, record.acpSessionId);
+
+  await manager.setConfigOption(handle, "effort", "high");
+  assert.deepEqual(saved.at(-1)?.acpx?.desired_config_options, { effort: "high" });
+  await manager.setConfigOption(handle, "effort", "low");
+  assert.deepEqual(saved.at(-1)?.acpx?.desired_config_options, { effort: "low" });
+  assert.deepEqual(events, ["construct", "load", "write:high", "write:low"]);
+  assert.equal(saved.length, 3);
+  await manager.close(handle);
+  assert.equal(events.at(-1), "close");
+});
+
+test("AcpRuntimeManager rejects oneshot, pre-aborted and post-shutdown connects before creating a client", async (t) => {
+  const { manager, handle, events } = createConnectSessionFixture(t);
+  const reason = new Error("authority ended");
+  await assert.rejects(
+    manager.connectSession(handle, "persistent", { signal: AbortSignal.abort(reason) }),
+    (error) => error === reason,
+  );
+  await assert.rejects(
+    manager.connectSession(handle, "oneshot"),
+    (error) => error instanceof AcpRuntimeError && error.code === "ACP_BACKEND_UNSUPPORTED_CONTROL",
+  );
+  await manager.shutdown();
+  await assert.rejects(manager.connectSession(handle, "persistent"), /runtime is shut down/);
+  assert.deepEqual(events, []);
+});
+
+for (const phase of ["load", "checkpoint", "after registration"] as const) {
+  test(`AcpRuntimeManager handles connect authority ending at ${phase}`, async (t) => {
+    const controller = new AbortController();
+    const reason = new Error("authority ended");
+    const { manager, handle, events } = createConnectSessionFixture(t, {
+      load: async () => {
+        if (phase === "load") {
+          controller.abort(reason);
+        }
+      },
+      save: async () => {
+        if (phase === "checkpoint") {
+          controller.abort(reason);
+        }
+      },
+    });
+    const connected = manager.connectSession(handle, "persistent", { signal: controller.signal });
+    if (phase === "after registration") {
+      await connected;
+      controller.abort(reason);
+      await manager.connectSession(handle, "persistent");
+      assert.deepEqual(events, ["construct", "load"]);
+      await manager.close(handle);
+    } else {
+      await assert.rejects(connected, (error) => error === reason);
+    }
+    assert.deepEqual(events, ["construct", "load", "close"]);
+  });
+}
+
+for (const failClose of [false, true]) {
+  test(`AcpRuntimeManager keeps the existing identity after failed connect${failClose ? " and failed cleanup" : ""}`, async (t) => {
+    let refuseLoad = true;
+    let refuseClose = failClose;
+    const { manager, handle, record, store, events } = createConnectSessionFixture(t, {
+      load: async () => {
+        if (refuseLoad) {
+          throw RequestError.internalError(undefined, "load failed");
+        }
+      },
+      close: async () => {
+        if (refuseClose) {
+          throw new Error("close failed");
+        }
+      },
+    });
+    await assert.rejects(
+      manager.connectSession(handle, "persistent"),
+      /could not be resumed: .*load failed/,
+    );
+    assert.deepEqual(events, ["construct", "load", "close"]);
+    assert.equal((await store.load(record.acpxRecordId))?.acpSessionId, record.acpSessionId);
+    refuseLoad = false;
+    if (failClose) {
+      await assert.rejects(manager.connectSession(handle, "persistent"), /close failed/);
+      assert.deepEqual(events, ["construct", "load", "close", "close"]);
+      refuseClose = false;
+    }
+    await manager.connectSession(handle, "persistent");
+    assert.deepEqual(events.slice(-2), ["construct", "load"]);
+    await manager.close(handle);
+    assert.equal(events.filter((event) => event === "close").length, failClose ? 4 : 2);
+  });
+}
 
 test("AcpRuntimeManager closes an incompatible persistent owner before replacing its record", async () => {
   const store = new InMemorySessionStore();
@@ -2548,6 +2747,7 @@ test("AcpRuntimeManager routes controls through the active controller while a tu
   let cancelRequested = 0;
   let setModeCalls = 0;
   let setConfigCalls = 0;
+  let clients = 0;
   let resolvePromptStart!: () => void;
   let resolvePrompt!: (value: { stopReason: string }) => void;
   const promptStarted = new Promise<void>((resolve) => {
@@ -2606,7 +2806,10 @@ test("AcpRuntimeManager routes controls through the active controller while a tu
   const manager = new AcpRuntimeManager(
     createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
     {
-      clientFactory: () => client as never,
+      clientFactory: () => {
+        clients += 1;
+        return client as never;
+      },
     },
   );
 
@@ -2619,6 +2822,8 @@ test("AcpRuntimeManager routes controls through the active controller while a tu
   });
   const eventsPromise = collectEvents(turn.events);
   await promptStarted;
+  await manager.connectSession(createHandle("live-session"), "persistent");
+  assert.equal(clients, 1);
   await manager.setMode(createHandle("live-session"), "plan");
   await manager.setConfigOption(createHandle("live-session"), "approval", "manual");
   const liveStatusDuringTurn = await manager.getStatus(createHandle("live-session"));

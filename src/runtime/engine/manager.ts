@@ -249,6 +249,7 @@ type RuntimeSessionOwner = {
   checkpoint: LiveSessionCheckpoint;
   retirement?: Promise<void>;
   pendingResetRecord?: SessionRecord;
+  failedConnectRecord?: SessionRecord;
   sessionKey: string;
   mode: "persistent" | "oneshot";
   recordId?: string;
@@ -1184,6 +1185,12 @@ export class AcpRuntimeManager {
   }
 
   private async settleRetiredSessionRecord(owner: RuntimeSessionOwner): Promise<void> {
+    if (owner.failedConnectRecord) {
+      await this.saveFailedConnectLifecycle(owner.client, owner.failedConnectRecord);
+      owner.failedConnectRecord = undefined;
+      owner.recordId = undefined;
+      return;
+    }
     const record = owner.pendingResetRecord;
     if (!record) {
       return;
@@ -2067,6 +2074,119 @@ export class AcpRuntimeManager {
       },
       authority,
     );
+  }
+
+  async connectSession(
+    handle: AcpRuntimeHandle,
+    sessionMode: "persistent" | "oneshot",
+    authority?: AcpControlAuthority,
+  ): Promise<void> {
+    const recordId = handle.acpxRecordId ?? handle.sessionKey;
+    await this.withManagerLock(
+      this.runtimeOperationLocks,
+      recordId,
+      async () => this.connectSessionWithOwnership(recordId, sessionMode, authority),
+      authority,
+    );
+  }
+
+  private async connectSessionWithOwnership(
+    recordId: string,
+    sessionMode: "persistent" | "oneshot",
+    authority?: AcpControlAuthority,
+  ): Promise<void> {
+    if (sessionMode !== "persistent") {
+      throw new AcpRuntimeError(
+        "ACP_BACKEND_UNSUPPORTED_CONTROL",
+        `Only persistent ACP sessions can keep a connection open: ${recordId}.`,
+      );
+    }
+    await this.retrySessionCleanup(recordId);
+    const record = await this.requireRecord(recordId);
+    assertControlAuthority(authority);
+    if (this.activeControllers.has(recordId)) {
+      return;
+    }
+    const retained = await this.readRetainedSessionOwner(record, { consume: false });
+    assertControlAuthority(authority);
+    this.assertOpen();
+    if (retained) {
+      return;
+    }
+    // An unusable retained owner can fail to close while being removed.
+    await this.retrySessionCleanup(recordId);
+    assertControlAuthority(authority);
+    await this.loadRetainedSessionOwner(record, authority);
+  }
+
+  private async loadRetainedSessionOwner(
+    record: SessionRecord,
+    authority?: AcpControlAuthority,
+  ): Promise<void> {
+    const { acpxRecordId: recordId, closed, closedAt } = record;
+    const client = this.createTurnClient(record);
+    const owner = this.createSessionOwner({
+      client,
+      sessionKey: record.name ?? recordId,
+      mode: "persistent",
+    });
+    try {
+      await connectAndLoadSession({
+        client,
+        record,
+        resumePolicy: "same-session-only",
+        strictResume: true,
+        timeoutMs: this.options.timeoutMs,
+        authority,
+        onConnectedRecord: () => this.attachIdleProjection(owner, record),
+      });
+      this.assertOpen();
+      assertControlAuthority(authority);
+      owner.recordId = recordId;
+      this.refreshOwnedRecordLifecycle(owner, record);
+      await owner.checkpoint.checkpoint();
+      this.assertOpen();
+      assertControlAuthority(authority);
+      if (!this.canRetainPersistentSessionOwner(owner, record)) {
+        throw new AcpRuntimeError(
+          "ACP_SESSION_INIT_FAILED",
+          `ACP session ${recordId} did not stay connected after loading.`,
+        );
+      }
+      this.retainedSessionOwners.set(recordId, owner);
+    } catch (error) {
+      record.closed = closed;
+      record.closedAt = closedAt;
+      await this.abandonConnectSessionOwner(owner, record);
+      throw error;
+    }
+  }
+
+  private async abandonConnectSessionOwner(
+    owner: RuntimeSessionOwner,
+    record: SessionRecord,
+  ): Promise<void> {
+    owner.recordId = undefined;
+    owner.projection = undefined;
+    await settleAttempt(() => owner.client.clearEventHandlers());
+    const closeAttempt = await settleAttempt(async () => this.closeClient(owner.client));
+    await settleAttempt(async () => owner.checkpoint.flush());
+    await this.saveFailedConnectLifecycle(owner.client, record);
+    if (!closeAttempt.ok) {
+      owner.recordId = record.acpxRecordId;
+      owner.failedConnectRecord = record;
+      this.retiringSessionOwners.add(owner);
+    }
+  }
+
+  private async saveFailedConnectLifecycle(
+    client: AcpClient,
+    record: SessionRecord,
+  ): Promise<void> {
+    await settleAttempt(async () => {
+      applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
+      await this.options.sessionStore.save(record);
+    });
   }
 
   async cancel(handle: AcpRuntimeHandle): Promise<void> {
