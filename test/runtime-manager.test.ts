@@ -4903,6 +4903,74 @@ test("AcpRuntimeManager fails persistent turns clearly when session reuse is una
   assert.equal(promptCalls, 0);
 });
 
+for (const scenario of [
+  { command: "openclaw acp", name: undefined, resume: true },
+  { command: "custom-launcher", name: "openclaw-acp", resume: true },
+  { command: "openclaw acp", name: undefined, resume: false },
+]) {
+  test(`OpenClaw recovery never replaces missing sessions (${scenario.command}, resume=${scenario.resume})`, async () => {
+    const record = makeSessionRecord({
+      acpxRecordId: "openclaw-session:oneshot:1",
+      acpSessionId: "missing-session",
+      agentCommand: scenario.command,
+      cwd: "/workspace",
+    });
+    const store = new InMemorySessionStore([record]);
+    const calls: string[] = [];
+    const manager = new AcpRuntimeManager(
+      createRuntimeOptions({ cwd: "/workspace", sessionStore: store }),
+      {
+        clientFactory: () =>
+          ({
+            initializeResult: { agentInfo: { name: scenario.name, version: "test" } },
+            start: async () => {},
+            close: async () => {},
+            hasReusableSession: () => false,
+            supportsLoadSession: () => true,
+            supportsResumeSession: () => scenario.resume,
+            resumeSession: async () => {
+              calls.push("resume");
+              throw Object.assign(new Error("missing session"), { code: -32603 });
+            },
+            loadSessionWithOptions: async () => {
+              calls.push("load");
+              return {};
+            },
+            createSession: async () => {
+              calls.push("new");
+              return { sessionId: "replacement" };
+            },
+            prompt: async () => {
+              calls.push("prompt");
+              return { stopReason: "end_turn" };
+            },
+            getAgentLifecycleSnapshot: () => ({ running: true }),
+            hasActivePrompt: () => false,
+            requestCancelActivePrompt: async () => false,
+            clearEventHandlers: () => {},
+            setEventHandlers: () => {},
+          }) as never,
+      },
+    );
+    try {
+      const { result } = await collectTurn(
+        manager.startTurn({
+          handle: createHandle("openclaw-session", record.acpxRecordId),
+          text: "hello",
+          mode: "prompt",
+          sessionMode: "oneshot",
+          requestId: "openclaw-reconnect",
+        }),
+      );
+      assert.equal(result.status, "failed");
+      assert.deepEqual(calls, ["resume"]);
+      assert.equal((await store.load(record.acpxRecordId))?.acpSessionId, "missing-session");
+    } finally {
+      await manager.shutdown();
+    }
+  });
+}
+
 test("AcpRuntimeManager still falls back to a fresh session for oneshot turns", async () => {
   const record = makeSessionRecord({
     acpxRecordId: "oneshot-session:oneshot:1",
