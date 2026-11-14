@@ -409,6 +409,8 @@ export interface AcpRuntime {
       value: string;
     },
   ): Promise<SetSessionConfigOptionResponse | void>;
+  /** Loads a persistent session without a prompt and retains the connection for controls and turns until close or shutdown. */
+  connectSession?(input: AcpControlAuthority & { handle: AcpRuntimeHandle }): Promise<void>;
   doctor?(): Promise<AcpRuntimeDoctorReport>;
   cancel(input: { handle: AcpRuntimeHandle; reason?: string }): Promise<void>;
   /** Locally closes the session and persists fresh creation on the next ensure without resumeSessionId. */

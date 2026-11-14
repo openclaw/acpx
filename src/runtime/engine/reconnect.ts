@@ -90,11 +90,15 @@ export type ConnectAndLoadSessionOptions = {
    * record no prompt and so must show no user history to be eligible for a fresh session.
    */
   promptRecorded?: boolean;
-  activeController: ConnectedSessionController;
-  onClientAvailable?: (controller: ConnectedSessionController) => void;
   onConnectedRecord?: (record: SessionRecord) => void;
   onSessionIdResolved?: (sessionId: string) => void;
-};
+} & (
+  | {
+      activeController: ConnectedSessionController;
+      onClientAvailable?: (controller: ConnectedSessionController) => void;
+    }
+  | { activeController?: never; onClientAvailable?: never }
+);
 
 export type ConnectAndLoadSessionResult = {
   sessionId: string;

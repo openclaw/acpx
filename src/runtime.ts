@@ -345,6 +345,12 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     return await manager.setConfigOption(handle, input.key, input.value, state.mode, input);
   }
 
+  async connectSession(input: AcpControlAuthority & { handle: AcpRuntimeHandle }): Promise<void> {
+    const { handle, state } = this.resolveManagerHandle(input.handle);
+    const manager = await this.getManager();
+    await manager.connectSession(handle, state.mode, input);
+  }
+
   async cancel(input: { handle: AcpRuntimeHandle; reason?: string }): Promise<void> {
     const { handle } = this.resolveManagerHandle(input.handle);
     const manager = await this.getManager();
