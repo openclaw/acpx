@@ -8,6 +8,10 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- Dependencies: update the guarded filesystem runtime, Commander, and development tools while retaining the ACP SDK 1.x line and existing security overrides.
+
+### Fixes
+
 - Sessions: keep tool result text that agents report through ACP `content` blocks when they send no `rawOutput`, so saved sessions and the embedded runtime no longer record those results as empty. Thanks @saariuslystoned.
 
 - Runtime/embedding: keep cancellation of an already-settled turn from cancelling a later turn on the same reused session client. Thanks @saariuslystoned.
