@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fsSync, { type BigIntStats, type Stats } from "node:fs";
-import fs from "node:fs/promises";
+import fs, { type FileHandle } from "node:fs/promises";
 import test, { type TestContext } from "node:test";
 import {
   sessionBaseDir,
@@ -474,7 +474,20 @@ for (const failure of ["EIO", "abort"] as const) {
       const controller = new AbortController();
       const reason = new Error("post-read verification aborted");
       const original = fs.lstat;
-      let calls = 0;
+      const probe = await fs.open(sessionEventActivePath(record.acpxRecordId), "r");
+      const handlePrototype = Object.getPrototypeOf(probe) as FileHandle;
+      await probe.close();
+      const originalRead = handlePrototype.read;
+      let readFinished = false;
+      const read = t.mock.method(
+        handlePrototype,
+        "read",
+        async function (this: FileHandle, ...args: Parameters<FileHandle["read"]>) {
+          const result = await originalRead.apply(this, args);
+          readFinished = true;
+          return result;
+        },
+      );
       let injected = 0;
       const verification = t.mock.method(
         fs,
@@ -486,7 +499,12 @@ for (const failure of ["EIO", "abort"] as const) {
             }
             throw error;
           });
-          if (args[1]?.bigint === true && ++calls === 4) {
+          if (
+            readFinished &&
+            injected === 0 &&
+            args[0] === sessionEventActivePath(record.acpxRecordId) &&
+            args[1]?.bigint === true
+          ) {
             injected += 1;
             if (failure === "EIO") {
               throw Object.assign(new Error("post-read verification EIO"), { code: "EIO" });
@@ -506,6 +524,7 @@ for (const failure of ["EIO", "abort"] as const) {
         assert.equal(injected, 1);
       } finally {
         verification.mock.restore();
+        read.mock.restore();
       }
       assert.deepEqual(snapshotLabels(await reader.read()), ["D"]);
       assert.deepEqual(snapshotLabels(await reader.read()), []);

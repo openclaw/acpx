@@ -567,8 +567,23 @@ test("replay viewer refreshes runs snapshots after idle periods", async () => {
       (message): message is Extract<ReplayServerMessage, { type: "runs_snapshot" }> =>
         message.type === "runs_snapshot",
     );
-    assert.equal(listViewerRuns(secondSnapshot.state)[0]?.runId, secondRunId);
-    assert.equal(listViewerRuns(secondSnapshot.state)[1]?.runId, firstRunId);
+    let state = secondSnapshot.state;
+    let version = secondSnapshot.version;
+    const deadline = Date.now() + 5_000;
+    // A poll started before the new run was written can supply the initial snapshot.
+    while (listViewerRuns(state)[0]?.runId !== secondRunId) {
+      const remainingMs = deadline - Date.now();
+      assert.ok(remainingMs > 0, "Timed out waiting for the new run after reconnect");
+      const patch = await secondInbox.next(
+        (message): message is Extract<ReplayServerMessage, { type: "runs_patch" }> =>
+          message.type === "runs_patch",
+        remainingMs,
+      );
+      assert.equal(patch.fromVersion, version);
+      state = applyReplayPatch<ViewerRunsState>(state, patch.ops);
+      version = patch.toVersion;
+    }
+    assert.equal(listViewerRuns(state)[1]?.runId, firstRunId);
 
     await closeSocket(secondSocket);
   } finally {
