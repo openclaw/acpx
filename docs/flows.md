@@ -232,7 +232,7 @@ Arbitrary callback JavaScript cannot be forcibly stopped. Check `context.signal`
 
 A shell action's `timeoutMs: 0` disables its own deadline; an enclosing node deadline still applies. Node and command deadlines must be finite and no greater than 2,147,483,647 milliseconds. Invalid command deadlines or non-string `stdin` values are rejected before spawning. On expiry or interruption, acpx cancels active shell commands and waits for termination and output-stream cleanup before reporting cancellation. Cleanup failures are reported instead of silently claiming cleanup succeeded. An executor that resolves after its node has timed out or been interrupted cannot launch a new shell process.
 
-A shell action whose command, `shell`, or `cwd` does not exist fails with the spawn error's `ENOENT` code; when acpx can tell which piece is missing, the message names it: the working directory, the executable path, or a command that is not on the child `PATH`.
+A shell action whose command, `shell`, or `cwd` does not exist fails with the spawn error's `ENOENT` code; when acpx can tell which piece is missing, the message names it: the working directory, the executable path, or a command that is not on the child `PATH`. A `cwd` that is a regular file fails with `ENOTDIR` and the same working-directory message.
 
 A shell node drains its wrapper's final stdout and stderr after exit, waiting for pipe closure for up to 100 milliseconds. Inherited pipes from a surviving descendant do not keep a completed flow's host alive beyond that drain window. While other work keeps the host running, these pipes continue draining without extending the completed result.
 

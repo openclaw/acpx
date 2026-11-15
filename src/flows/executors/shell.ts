@@ -304,14 +304,22 @@ async function runShellProcess(
     ...process.env,
     ...spec.env,
   };
-  const child = spawn(spec.command, args, {
-    cwd,
-    env,
-    shell: spec.shell,
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
-    detached: process.platform !== "win32",
-  });
+  const failurePrefix = `Shell action failed (${renderShellCommand(spec.command, args)}): `;
+  const spawnContext = { command: spec.command, cwd, env };
+  let child;
+  try {
+    child = spawn(spec.command, args, {
+      cwd,
+      env,
+      shell: spec.shell,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+      detached: process.platform !== "win32",
+    });
+  } catch (error) {
+    // A regular-file cwd makes spawn throw ENOTDIR synchronously, before any child exists.
+    throw describeSpawnEnoent(error, failurePrefix, spawnContext);
+  }
 
   const termination = createShellTermination(child, timeoutMs, options);
   const finish = waitForShellResult(child, spec, args, cwd, startMs, termination, mode);
@@ -322,11 +330,7 @@ async function runShellProcess(
     return result;
   } catch (error) {
     await termination.cancel("SIGTERM");
-    throw describeSpawnEnoent(
-      error,
-      `Shell action failed (${renderShellCommand(spec.command, args)}): `,
-      { command: spec.command, cwd, env },
-    );
+    throw describeSpawnEnoent(error, failurePrefix, spawnContext);
   } finally {
     await termination.dispose();
   }

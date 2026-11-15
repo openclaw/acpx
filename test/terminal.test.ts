@@ -1033,6 +1033,8 @@ test(
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-terminal-test-"));
     try {
       const manager = new TerminalManager({ cwd: tmp, permissionMode: "approve-all" });
+      const fileCwd = path.join(tmp, "cwd-file");
+      await fs.writeFile(fileCwd, "not a directory\n");
       const cases = [
         {
           request: { command: "acpx-missing-terminal-tool", args: ["--version"] },
@@ -1047,13 +1049,18 @@ test(
           request: { command: process.execPath, args: ["-e", ""], cwd: path.join(tmp, "gone") },
           message: /^Working directory is unavailable: .*gone\. spawn /,
         },
+        {
+          request: { command: process.execPath, args: ["-e", ""], cwd: fileCwd },
+          message: /^Working directory is unavailable: .*cwd-file\. spawn ENOTDIR$/,
+          code: "ENOTDIR",
+        },
       ];
-      for (const { request, message } of cases) {
+      for (const { request, message, code = "ENOENT" } of cases) {
         await assert.rejects(
           manager.createTerminal({ sessionId: "session-1", ...request }),
           (error) =>
             error instanceof Error &&
-            (error as NodeJS.ErrnoException).code === "ENOENT" &&
+            (error as NodeJS.ErrnoException).code === code &&
             message.test(error.message),
         );
       }

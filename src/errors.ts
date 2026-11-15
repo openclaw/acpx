@@ -73,7 +73,7 @@ export function spawnEnoentHint(context: SpawnPathContext): string {
 }
 
 /**
- * Prefixes a spawn ENOENT with the launch path that was missing.
+ * Prefixes a spawn ENOENT or ENOTDIR with the launch path that was missing.
  * Other errors pass through unchanged.
  */
 export function describeSpawnEnoent(
@@ -84,7 +84,7 @@ export function describeSpawnEnoent(
   const spawnError = error as NodeJS.ErrnoException;
   if (
     !(error instanceof Error) ||
-    spawnError.code !== "ENOENT" ||
+    (spawnError.code !== "ENOENT" && spawnError.code !== "ENOTDIR") ||
     !spawnError.syscall?.startsWith("spawn")
   ) {
     return error;
@@ -107,8 +107,10 @@ export class AgentSpawnError extends AcpxOperationalError {
   constructor(agentCommand: string, cause?: unknown, context?: SpawnPathContext) {
     const spawnCode = cause instanceof Error ? (cause as NodeJS.ErrnoException).code : undefined;
     const spawnEnoent = spawnCode === "ENOENT";
-    const hint = spawnEnoent && context ? spawnEnoentHint(context) : "";
-    const message = spawnEnoent
+    // A regular file passed as the working directory makes spawn fail with ENOTDIR instead.
+    const missingLaunchPath = spawnEnoent || spawnCode === "ENOTDIR";
+    const hint = missingLaunchPath && context ? spawnEnoentHint(context) : "";
+    const message = missingLaunchPath
       ? `Failed to spawn agent command: ${agentCommand}. ${hint}The agent process could not start because a required executable, interpreter, working directory, or other launch path was not found. Check the command, effective PATH, and working directory, or verify the custom agent's configured argv.`
       : `Failed to spawn agent command: ${agentCommand}`;
     super(message, {
