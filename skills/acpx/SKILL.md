@@ -84,7 +84,7 @@ If prompt text is omitted and stdin is piped, `acpx` reads prompt text from stdi
 Friendly agent names resolve to commands:
 
 - `pi` -> `npx --package=pi-acp -- pi-acp` (ACPX-owned package range; see `agents/Pi.md`)
-- `openclaw` -> `openclaw acp` (see the [OpenClaw guide](https://github.com/openclaw/acpx/blob/main/agents/OpenClaw.md))
+- `openclaw` -> `openclaw acp`. Existing sessions require advertised `session/resume` support and are restored with `requireExisting`; failed recovery never creates a replacement session. See the [OpenClaw guide](https://github.com/openclaw/acpx/blob/main/agents/OpenClaw.md).
 - `codex` -> `npx -y --package=@agentclientprotocol/codex-acp -- codex-acp` (ACPX-owned package range)
 - `claude` -> `npx -y --package=@agentclientprotocol/claude-agent-acp -- claude-agent-acp` (ACPX-owned package range; see `agents/Claude.md`)
 - `gemini` -> `gemini --acp`
