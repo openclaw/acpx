@@ -3,16 +3,22 @@ Optional linked context:
 Add a visible `Closes #<issue-number>` or `Related: #<issue-number>` line
 below this comment.
 
-Required PR title:
-type: user-facing description
-Use a parenthesized scope only when it adds clarity:
-fix(auth): login redirect loops when session cookie is expired
+Write for someone who uses acpx to run agent tasks but has not read the code. The title
+and opening problem statement should make sense without the diff or linked issue.
 
+Required PR title:
+type: <what changes for the person affected>
 Types: feat, fix, improve, refactor, docs, chore.
-For fixes, describe the user-visible symptom and trigger:
-fix: task list fails to load when user has no environments
-Avoid implementation details such as:
-fix: add null check to task query
+Use a parenthesized scope only when it helps that reader.
+
+Name the affected task and the symptom or outcome, not the implementation:
+Good: fix: let callers resume an agent conversation after a disconnect
+Bad: fix(session): reset the transport pointer
+Good: docs: help callers choose between one-shot and ongoing conversations
+Bad: docs: rewrite session API sections
+
+For internal-only work, name the actual developer or operator workflow affected.
+Do not invent an end-user benefit.
 
 **MUST:** Keep **Allow edits from maintainers** enabled for this PR so maintainers
 can help update the branch when needed.
@@ -22,10 +28,16 @@ can help update the branch when needed.
 
 <!--
 Describe the concrete user, product, or operational problem.
-Use one short, plain-language sentence. For fixes, prefer:
-"Fixes: <what goes wrong> when <trigger or condition>."
-For other changes, describe the need without inventing a bug.
-Name the affected workflow, not the code-level cause.
+In 1–3 short, plain-language sentences, explain what someone is trying to do,
+what goes wrong or is missing, and why it matters. For a fix, include the trigger
+when known. For other changes, describe the need without inventing a bug.
+
+Good: "Callers resuming an agent conversation after a disconnect can lose their
+previous context, so they have to repeat the task and earlier decisions."
+Bad: "Fixes the stale session pointer in the reconnect handler."
+
+Describe the experienced problem, not just the code change. Save function names
+and the root-cause walkthrough for the explanation below.
 -->
 
 ## User Impact
@@ -54,8 +66,8 @@ terminal output, focused tests, CI results, live observations, redacted logs,
 and artifact links are all useful. Include before/after evidence for visual
 changes when it clarifies the result.
 
-Reviewers will inspect the code, tests, and CI. Use this section to make the
-validation easy to understand, not to restate the diff.
-Summarize what was checked and the result; note meaningful gaps. Link long output
-or put it in optional <details>, keeping the useful evidence summary visible.
+Start with the behavior checked and the result in plain language. Reviewers will
+inspect the code, tests, and CI; do not make them decode command lists to learn
+what was verified. Put exact commands, commit hashes, and long output in links
+or optional <details>. Keep the useful evidence summary and meaningful gaps visible.
 -->
