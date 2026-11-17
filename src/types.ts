@@ -293,6 +293,7 @@ export type AcpClientOptions = {
   sessionOptions?: {
     model?: string;
     allowedTools?: string[];
+    disallowedTools?: string[];
     maxTurns?: number;
     systemPrompt?: string | { append: string };
     env?: Record<string, string>;
@@ -443,6 +444,7 @@ export type SessionAcpxState = {
   session_options?: {
     model?: string;
     allowed_tools?: string[];
+    disallowed_tools?: string[];
     max_turns?: number;
     system_prompt?: string | { append: string };
     env?: Record<string, string>;

@@ -405,6 +405,22 @@ const pendingOneShotOptionCases: Array<{
   },
   { label: "omitted followed by empty options", second: {}, reuse: true },
   {
+    label: "matching deny lists",
+    first: { disallowedTools: ["Bash"] },
+    second: { disallowedTools: ["Bash"] },
+    reuse: true,
+  },
+  {
+    label: "omitted deny list versus explicit empty deny list",
+    second: { disallowedTools: [] },
+    reuse: false,
+  },
+  {
+    label: "deny list versus omitted deny list",
+    first: { disallowedTools: ["Bash"] },
+    reuse: false,
+  },
+  {
     label: "omitted tools versus explicit empty tools",
     second: { allowedTools: [] },
     reuse: false,
@@ -5480,6 +5496,49 @@ test("persistSessionOptions preserves an explicit empty allowedTools list", () =
     system_prompt: undefined,
     env: undefined,
   });
+});
+
+test("disallowedTools persists, restores, and merges with explicit-empty precedence", () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "deny-list-session",
+    acpSessionId: "deny-list-sid",
+    agentCommand: "codex --acp",
+    cwd: "/workspace",
+  });
+
+  persistSessionOptions(record, { disallowedTools: ["Bash"] });
+  assert.deepEqual(record.acpx?.session_options, {
+    model: undefined,
+    allowed_tools: undefined,
+    disallowed_tools: ["Bash"],
+    max_turns: undefined,
+    system_prompt: undefined,
+    env: undefined,
+  });
+  const stored = sessionOptionsFromRecord(record);
+  assert.deepEqual(stored, { disallowedTools: ["Bash"] });
+
+  // Reconnect options that omit the deny list keep the saved one.
+  assert.deepEqual(mergeSessionOptions({ model: "fast" }, stored), {
+    model: "fast",
+    disallowedTools: ["Bash"],
+  });
+  assert.deepEqual(mergeSessionOptions({ disallowedTools: undefined }, stored), {
+    disallowedTools: ["Bash"],
+  });
+  // An explicit list, including an empty one, takes precedence.
+  assert.deepEqual(mergeSessionOptions({ disallowedTools: [] }, stored), { disallowedTools: [] });
+  assert.deepEqual(mergeSessionOptions({ disallowedTools: ["Write"] }, stored), {
+    disallowedTools: ["Write"],
+  });
+
+  persistSessionOptions(record, { disallowedTools: [] });
+  assert.deepEqual(record.acpx?.session_options?.disallowed_tools, []);
+  assert.deepEqual(sessionOptionsFromRecord(record), { disallowedTools: [] });
+
+  persistSessionOptions(record, { model: "fast" });
+  assert.equal(Object.hasOwn(record.acpx?.session_options ?? {}, "disallowed_tools"), false);
+  assert.deepEqual(sessionOptionsFromRecord(record), { model: "fast" });
 });
 
 test("persistSessionOptions preserves session env as a serialized record", () => {

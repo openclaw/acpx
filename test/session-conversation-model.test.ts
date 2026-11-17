@@ -448,3 +448,14 @@ test("cloneSessionAcpxState preserves desired mode id", () => {
     max_turns: 7,
   });
 });
+
+test("cloneSessionAcpxState copies deny lists, including an explicit empty list", () => {
+  for (const disallowedTools of [["Bash"], []]) {
+    const source = { session_options: { disallowed_tools: disallowedTools } };
+    const cloned = cloneSessionAcpxState(source);
+    assert.deepEqual(cloned?.session_options?.disallowed_tools, disallowedTools);
+    assert.notEqual(cloned?.session_options?.disallowed_tools, disallowedTools);
+  }
+  const withoutDenyList = cloneSessionAcpxState({ session_options: { model: "sonnet" } });
+  assert.equal(Object.hasOwn(withoutDenyList?.session_options ?? {}, "disallowed_tools"), false);
+});
