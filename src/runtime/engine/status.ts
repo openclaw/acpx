@@ -1,7 +1,9 @@
+import { opaqueCompactionId } from "../../prompt-content.js";
 import { advertisedModelState } from "../../session/model-state.js";
 import type { SessionAcpxState, SessionRecord, SessionTokenUsage } from "../../types.js";
 import type {
   AcpRuntimeAvailableCommand,
+  AcpRuntimeCompaction,
   AcpRuntimeSessionModels,
   AcpRuntimeSessionUsage,
   AcpRuntimeStatus,
@@ -19,6 +21,7 @@ export function runtimeStatusFromRecord(record: SessionRecord): AcpRuntimeStatus
     ...buildModelsField(record),
     ...buildUsageField(record),
     ...buildAvailableCommandsField(record),
+    ...buildCompactionsField(record),
     details: {
       cwd: record.cwd,
       lastUsedAt: record.lastUsedAt,
@@ -152,4 +155,72 @@ function commandRecord(
     return undefined;
   }
   return value;
+}
+
+function buildCompactionsField(record: SessionRecord): {
+  compactions?: AcpRuntimeCompaction[];
+} {
+  const compactions = record.acpx?.compactions;
+  if (!compactions || compactions.length === 0) {
+    return {};
+  }
+  const normalized = compactions
+    .map((compaction) => runtimeCompaction(compaction))
+    .filter((compaction): compaction is AcpRuntimeCompaction => compaction !== undefined);
+  return normalized.length > 0 ? { compactions: normalized } : {};
+}
+
+function runtimeCompaction(compaction: unknown): AcpRuntimeCompaction | undefined {
+  const record = compactionRecord(compaction);
+  if (!record) {
+    return undefined;
+  }
+  const compactionId = opaqueCompactionId(record.compaction_id);
+  const status = asOptionalString(record.status);
+  if (!compactionId || !status) {
+    return undefined;
+  }
+  return {
+    compactionId,
+    status,
+    ...optionalCompactionFields(record),
+  };
+}
+
+type CompactionRecordShape = {
+  compaction_id?: unknown;
+  status?: unknown;
+  summary?: unknown;
+  error?: unknown;
+  after_messages?: unknown;
+};
+
+function compactionRecord(compaction: unknown): CompactionRecordShape | undefined {
+  if (!compaction || typeof compaction !== "object" || Array.isArray(compaction)) {
+    return undefined;
+  }
+  return compaction;
+}
+
+function optionalCompactionFields(record: CompactionRecordShape): Partial<AcpRuntimeCompaction> {
+  // Summary is display content: surface it verbatim, matching the persisted state.
+  const summary = asVerbatimString(record.summary);
+  const error = asOptionalString(record.error);
+  const afterMessages = asAfterMessages(record.after_messages);
+  return {
+    ...(summary !== undefined ? { summary } : {}),
+    ...(error ? { error } : {}),
+    ...(afterMessages !== undefined ? { afterMessages } : {}),
+  };
+}
+
+function asAfterMessages(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    return undefined;
+  }
+  return value;
+}
+
+function asVerbatimString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }

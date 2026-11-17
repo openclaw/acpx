@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import type { AnyMessage } from "@agentclientprotocol/sdk";
+import { resolveClientCapabilities } from "../src/acp/client-protocol.js";
 import { AcpClient } from "../src/acp/client.js";
 import { withTempDir } from "./runtime-test-helpers.js";
 
@@ -65,3 +66,45 @@ for (const enabled of [false, true]) {
     });
   });
 }
+
+test("client capabilities advertise the session compaction contract", () => {
+  for (const devinAcp of [false, true]) {
+    const capabilities = resolveClientCapabilities({
+      devinAcp,
+      fs: true,
+      terminal: true,
+      elicitationModes: [],
+    });
+    assert.deepEqual(capabilities.session, { compaction: {} });
+  }
+});
+
+test("initialize handshake carries the session compaction advertisement", async () => {
+  await withTempDir("acpx-capabilities-", async (cwd) => {
+    let output = "";
+    const client = new AcpClient({
+      agentCommand: process.execPath,
+      agentArgv: [process.execPath, agent],
+      cwd,
+      permissionMode: "approve-all",
+      onSessionUpdate: ({ update }) => {
+        if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
+          output += update.content.text;
+        }
+      },
+    });
+    try {
+      await client.start();
+      const session = await client.createSession();
+      output = "";
+      assert.equal(
+        (await client.prompt(session.sessionId, "client-capabilities")).stopReason,
+        "end_turn",
+      );
+      const advertised = JSON.parse(output) as { session?: { compaction?: unknown } };
+      assert.deepEqual(advertised.session, { compaction: {} });
+    } finally {
+      await client.close();
+    }
+  });
+});

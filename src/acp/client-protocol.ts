@@ -35,6 +35,9 @@ export function resolveClientCapabilities(params: {
       writeTextFile: params.fs,
     },
     terminal: params.terminal,
+    session: {
+      compaction: {},
+    },
     ...(params.elicitationModes.length > 0
       ? {
           elicitation: {

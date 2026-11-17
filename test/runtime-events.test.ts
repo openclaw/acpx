@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { runtimeStatusFromRecord } from "../src/runtime/engine/status.js";
 import { runtimeEventFromMessage } from "../src/runtime/public/events.js";
+import { makeSessionRecord } from "./runtime-test-helpers.js";
 
 function eventFromSessionUpdate(update: Record<string, unknown>) {
   return runtimeEventFromMessage({
@@ -868,4 +870,117 @@ test("runtimeEventFromMessage preserves detached tool payloads and JSON field om
     }),
     { type: "tool_call", text: "tool call", tag: "tool_call", title: "tool call" },
   );
+});
+
+test("runtimeEventFromMessage handles compaction updates and summary chunks", () => {
+  assert.deepEqual(
+    eventFromSessionUpdate({
+      sessionUpdate: "compaction_update",
+      compactionId: "c1",
+      status: "in_progress",
+      summary: [
+        { type: "text", text: "partial " },
+        { type: "text", text: "summary" },
+      ],
+    }),
+    {
+      type: "status",
+      text: "compaction in_progress",
+      tag: "compaction_update",
+      compaction: { compactionId: "c1", status: "in_progress", summary: "partial summary" },
+    },
+  );
+
+  assert.deepEqual(
+    eventFromSessionUpdate({
+      sessionUpdate: "compaction_update",
+      compactionId: "c1",
+      status: "failed",
+      error: "provider timed out",
+    }),
+    {
+      type: "status",
+      text: "compaction failed",
+      tag: "compaction_update",
+      compaction: { compactionId: "c1", status: "failed", error: "provider timed out" },
+    },
+  );
+
+  assert.deepEqual(
+    eventFromSessionUpdate({
+      sessionUpdate: "compaction_summary_chunk",
+      compactionId: "c1",
+      content: { type: "text", text: "more" },
+    }),
+    {
+      type: "status",
+      text: "compaction updated",
+      tag: "compaction_summary_chunk",
+      compaction: { compactionId: "c1", status: "in_progress", summary: "more" },
+    },
+  );
+
+  // Unknown statuses are preserved for generic display; malformed updates are dropped.
+  assert.deepEqual(
+    eventFromSessionUpdate({
+      sessionUpdate: "compaction_update",
+      compactionId: "c1",
+      status: "paused_for_review",
+    }),
+    {
+      type: "status",
+      text: "compaction paused_for_review",
+      tag: "compaction_update",
+      compaction: { compactionId: "c1", status: "paused_for_review" },
+    },
+  );
+  assert.equal(
+    eventFromSessionUpdate({ sessionUpdate: "compaction_update", status: "completed" }),
+    null,
+  );
+  assert.equal(
+    eventFromSessionUpdate({ sessionUpdate: "compaction_update", compactionId: "c1" }),
+    null,
+  );
+  // Padded IDs stay verbatim; blank IDs are dropped.
+  const padded = eventFromSessionUpdate({
+    sessionUpdate: "compaction_update",
+    compactionId: " c1",
+    status: "completed",
+  });
+  assert.ok(padded?.type === "status");
+  assert.deepEqual(padded.compaction, { compactionId: " c1", status: "completed" });
+  assert.equal(
+    eventFromSessionUpdate({
+      sessionUpdate: "compaction_update",
+      compactionId: "   ",
+      status: "completed",
+    }),
+    null,
+  );
+});
+
+test("runtimeStatusFromRecord surfaces persisted compactions", () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "status-compactions",
+    acpSessionId: "provider-status-compactions",
+    agentCommand: "agent",
+    cwd: "/tmp/status-compactions",
+  });
+  assert.equal(runtimeStatusFromRecord(record).compactions, undefined);
+
+  record.acpx = {
+    compactions: [
+      { compaction_id: "c1", status: "completed", summary: "done", after_messages: 4 },
+      { compaction_id: "c2", status: "paused_for_review", error: "waiting" },
+      { compaction_id: " c3", status: "in_progress", after_messages: -1 },
+      { compaction_id: "  ", status: "completed" },
+    ],
+  };
+  assert.deepEqual(runtimeStatusFromRecord(record).compactions, [
+    { compactionId: "c1", status: "completed", summary: "done", afterMessages: 4 },
+    { compactionId: "c2", status: "paused_for_review", error: "waiting" },
+    // Padded IDs stay verbatim; invalid anchors are dropped, blank IDs rejected.
+    { compactionId: " c3", status: "in_progress" },
+  ]);
 });

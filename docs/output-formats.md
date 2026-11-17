@@ -199,6 +199,24 @@ invalid status are skipped, and invalid priorities are omitted. Legacy updates
 without valid statuses can still produce a text summary. CLI JSON output
 continues to expose the original ACP payload.
 
+## Embedded runtime compactions
+
+The `acpx/runtime` turn stream exposes ACP `compaction_update` and
+`compaction_summary_chunk` notifications as `status` events retaining the
+original tag. The optional `compaction` field contains a normalized
+`AcpRuntimeCompaction` object with `compactionId`, `status`, and the reported
+`summary`/`error` text when present. Unknown statuses are preserved for
+generic display. Summary chunks carry no status and report `in_progress`;
+each event mirrors its wire update only — absent fields mean "not in this
+update", not "cleared". Consumers tracking the entity across updates key on
+`compactionId`. The persisted session record merges updates per the ACP
+patch semantics, and `getStatus()` surfaces the merged entities as
+`compactions`. Summaries are normalized to text (non-text blocks are
+skipped, matching agent-message reduction); first-seen IDs initialize even
+when a chunk carries no text. Merged entities carry `afterMessages`, the
+count of conversation messages received before the first notification,
+adjusted when message retention trims the conversation head.
+
 ## Embedded runtime tool calls
 
 The `acpx/runtime` turn stream exposes both ACP `tool_call` and `tool_call_update`
