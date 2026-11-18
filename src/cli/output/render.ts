@@ -13,7 +13,10 @@ function formatRoutedFrom(sessionCwd: string, currentCwd: string): string | unde
   if (!relative || relative === ".") {
     return undefined;
   }
-  return relative.startsWith(".") ? relative : `.${path.sep}${relative}`;
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    return relative;
+  }
+  return `.${path.sep}${relative}`;
 }
 
 type SessionConnectionStatus = "connected" | "starting" | "needs reconnect";
