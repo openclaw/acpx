@@ -456,7 +456,15 @@ export function resolveSessionsListFlags(
 }
 
 export function addPromptInputOption(command: Command): Command {
-  return command.option("-f, --file <path>", "Read prompt text from file path (use - for stdin)");
+  return command.option(
+    "-f, --file <path>",
+    "Read prompt text from file path (use - for stdin)",
+    (value: string) => {
+      // Validate only: paths may legitimately start or end with spaces.
+      parseNonEmptyValue("Prompt file", value);
+      return value;
+    },
+  );
 }
 
 export function addExecConfigOption(
