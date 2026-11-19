@@ -637,24 +637,29 @@ async function submitSetConfigOptionToQueueOwner(
   assertDispatch?: () => void,
   cliModelInput?: true,
 ): Promise<SetSessionConfigOptionResponse | undefined> {
-  // Only the dedicated CLI control needs the newer queue protocol. Reconcile a
-  // stale owner first: an abandoned old lease is not a live incompatibility.
-  // Resolution is generation-scoped; never downgrade or replay an admitted request.
-  if (cliModelInput === true) {
+  // Reconcile a stale owner before selecting a protocol. An older live owner
+  // can still accept the original request for values unchanged by CLI trimming.
+  // Whitespace-sensitive values require the new capability; never replay an
+  // admitted mutation or weaken owner-generation/request-ID correlation.
+  let useCliControl = cliModelInput === true;
+  if (useCliControl) {
     const currentOwner = await resolveUsableQueueOwner(owner.sessionId, owner);
     if (!currentOwner) {
       return undefined;
     }
     owner = currentOwner;
     if (owner.supportsCliConfigOptionIntent !== true) {
-      throw new QueueConnectionError(
-        "Running queue owner does not support CLI config option intent; close the session before retrying",
-        { detailCode: "QUEUE_CLI_CONFIG_OWNER_UNSUPPORTED", origin: "queue", retryable: false },
-      );
+      if (value !== value.trim()) {
+        throw new QueueConnectionError(
+          "Running queue owner cannot preserve this CLI config value; wait for the older owner to exit, then retry without closing the session. Closing ends the session and requires creating a new one.",
+          { detailCode: "QUEUE_CLI_CONFIG_OWNER_UNSUPPORTED", origin: "queue", retryable: false },
+        );
+      }
+      useCliControl = false;
     }
   }
   const request: QueueSetConfigOptionRequest | QueueSetCliConfigOptionRequest = {
-    type: cliModelInput === true ? "set_cli_config_option" : "set_config_option",
+    type: useCliControl ? "set_cli_config_option" : "set_config_option",
     requestId: randomUUID(),
     ownerGeneration: owner.ownerGeneration,
     configId,

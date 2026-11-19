@@ -158,3 +158,75 @@ test(
     });
   },
 );
+
+test(
+  "legacy-compatible unpadded CLI control still reaches a retained owner without new capability",
+  { timeout: 12_000 },
+  async () => {
+    await withTempHome(async () => {
+      const sessionId = "cli-old-owner-compatible";
+      const lease = await tryAcquireQueueOwnerLease(sessionId);
+      assert.ok(lease);
+      const calls: Array<{ configId: string; value: string; cliModelInput?: true }> = [];
+      const owner = await SessionQueueOwner.start(lease, {
+        cancelPrompt: async () => false,
+        closeSession: async () => false,
+        setSessionMode: async () => {},
+        setSessionModel: async () => undefined,
+        setSessionConfigOption: async (configId, value, _timeoutMs, cliModelInput) => {
+          calls.push({ configId, value, cliModelInput });
+          return { configOptions: [] };
+        },
+      });
+      const original = await fs.readFile(lease.lockPath, "utf8");
+      try {
+        const olderRecord = JSON.parse(original) as Record<string, unknown>;
+        delete olderRecord.supportsCliConfigOptionIntent;
+        await fs.writeFile(lease.lockPath, JSON.stringify(olderRecord) + "\n", "utf8");
+        assert.equal(
+          (await readQueueOwnerRecord(sessionId))?.supportsCliConfigOptionIntent,
+          undefined,
+        );
+
+        const compatible = await trySetConfigOptionOnRunningOwner(
+          sessionId,
+          "effort",
+          "high",
+          2000,
+          false,
+          undefined,
+          true,
+        );
+        assert.deepEqual(compatible?.value, { configOptions: [] });
+        assert.deepEqual(calls, [{ configId: "effort", value: "high", cliModelInput: undefined }]);
+
+        await assert.rejects(
+          trySetConfigOptionOnRunningOwner(
+            sessionId,
+            "effort",
+            " high ",
+            2000,
+            false,
+            undefined,
+            true,
+          ),
+          (error: unknown) => {
+            assert.ok(error instanceof Error);
+            const observed = error as Error & { detailCode?: string; retryable?: boolean };
+            assert.equal(observed.detailCode, "QUEUE_CLI_CONFIG_OWNER_UNSUPPORTED");
+            assert.equal(observed.retryable, false);
+            assert.match(observed.message, /wait for the older owner to exit/);
+            assert.match(observed.message, /without closing the session/);
+            return true;
+          },
+        );
+        assert.equal(calls.length, 1, "whitespace-sensitive request must not be dispatched");
+        assert.ok(await readQueueOwnerRecord(sessionId), "rejection must not retire a live owner");
+      } finally {
+        await fs.writeFile(lease.lockPath, original, "utf8");
+        await owner.close();
+        await releaseQueueOwnerLease(lease);
+      }
+    });
+  },
+);
