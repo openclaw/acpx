@@ -5,6 +5,7 @@ import { AcpxOperationalError, AgentSpawnError } from "../errors.js";
 import type { SessionListResult } from "../session/execution/contracts.js";
 import { exportSession } from "../session/export.js";
 import { importSession } from "../session/import.js";
+import { advertisedModelState } from "../session/model-state.js";
 import {
   findGitRepositoryRoot,
   findSession,
@@ -552,7 +553,9 @@ export async function handleSetConfigOption(
   const globalFlags = resolveGlobalFlags(command, config);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
   if (configId === "model") {
-    await handleSetModel(explicitAgentName, value, flags, command, config);
+    // The "model" shorthand keeps the trims that model selection has always
+    // applied; non-model values travel as typed.
+    await handleSetModel(explicitAgentName, value.trim(), flags, command, config);
     return;
   }
   const resolvedConfigId = resolveCompatibleConfigId(agent, configId);
@@ -563,11 +566,17 @@ export async function handleSetConfigOption(
     agent.cwd,
     resolveSessionNameFromFlags(flags, command),
   );
+  // A model selector is normalized where the CLI knows the control is the model
+  // one: the advertised ids are exact strings, so a typed selector is trimmed
+  // before it leaves the CLI. Every other value travels as typed, including to
+  // an owner that predates the ownership of this normalization.
+  const dispatchValue =
+    advertisedModelState(record.acpx)?.configId === resolvedConfigId ? value.trim() : value;
   const result = await setSessionConfigOption({
     ...sessionConnectionOptions(globalFlags, config),
     sessionId: record.acpxRecordId,
     configId: resolvedConfigId,
-    value,
+    value: dispatchValue,
   });
 
   if (globalFlags.verbose && result.loadError) {
@@ -576,7 +585,7 @@ export async function handleSetConfigOption(
     );
   }
 
-  printSetConfigOptionResultByFormat(configId, value, result, globalFlags.format);
+  printSetConfigOptionResultByFormat(configId, dispatchValue, result, globalFlags.format);
 }
 
 async function tryListAgentSessions(

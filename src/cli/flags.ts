@@ -196,6 +196,18 @@ export function parseNonEmptyValue(label: string, value: string): string {
   return trimmed;
 }
 
+/**
+ * Rejects an empty value but returns it exactly as typed. Adapters treat config
+ * option values as opaque strings, so surrounding whitespace can be part of the
+ * accepted value and must survive until the request is built.
+ */
+export function parseNonEmptyRawValue(label: string, value: string): string {
+  if (value.trim().length === 0) {
+    throw new InvalidArgumentError(`${label} must not be empty`);
+  }
+  return value;
+}
+
 export function parseSessionConfigOptionAssignment(value: string): SessionConfigOptionAssignment {
   const separator = value.indexOf("=");
   if (separator <= 0 || separator === value.length - 1) {
