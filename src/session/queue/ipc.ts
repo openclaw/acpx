@@ -32,6 +32,7 @@ import {
   type QueueOwnerSetModeResultMessage,
   type QueueRequest,
   type QueueSetConfigOptionRequest,
+  type QueueSetCliConfigOptionRequest,
   type QueueSetModelRequest,
   type QueueSetModeRequest,
   type QueueSubmitRequest,
@@ -634,9 +635,26 @@ async function submitSetConfigOptionToQueueOwner(
   value: string,
   timeoutMs?: number,
   assertDispatch?: () => void,
+  cliModelInput?: true,
 ): Promise<SetSessionConfigOptionResponse | undefined> {
-  const request: QueueSetConfigOptionRequest = {
-    type: "set_config_option",
+  // Only the dedicated CLI control needs the newer queue protocol. Reconcile a
+  // stale owner first: an abandoned old lease is not a live incompatibility.
+  // Resolution is generation-scoped; never downgrade or replay an admitted request.
+  if (cliModelInput === true) {
+    const currentOwner = await resolveUsableQueueOwner(owner.sessionId, owner);
+    if (!currentOwner) {
+      return undefined;
+    }
+    owner = currentOwner;
+    if (owner.supportsCliConfigOptionIntent !== true) {
+      throw new QueueConnectionError(
+        "Running queue owner does not support CLI config option intent; close the session before retrying",
+        { detailCode: "QUEUE_CLI_CONFIG_OWNER_UNSUPPORTED", origin: "queue", retryable: false },
+      );
+    }
+  }
+  const request: QueueSetConfigOptionRequest | QueueSetCliConfigOptionRequest = {
+    type: cliModelInput === true ? "set_cli_config_option" : "set_config_option",
     requestId: randomUUID(),
     ownerGeneration: owner.ownerGeneration,
     configId,
@@ -874,6 +892,7 @@ export async function trySetConfigOptionOnRunningOwner(
   timeoutMs: number | undefined,
   verbose: boolean | undefined,
   assertDispatch?: () => void,
+  cliModelInput?: true,
 ): Promise<OwnerControlResult<SetSessionConfigOptionResponse> | undefined> {
   return await tryControlOnRunningOwner({
     sessionId,
@@ -883,7 +902,14 @@ export async function trySetConfigOptionOnRunningOwner(
     submit: (owner) =>
       withOwnerControlPersistence(
         owner,
-        submitSetConfigOptionToQueueOwner(owner, configId, value, timeoutMs, assertDispatch),
+        submitSetConfigOptionToQueueOwner(
+          owner,
+          configId,
+          value,
+          timeoutMs,
+          assertDispatch,
+          cliModelInput,
+        ),
       ),
   });
 }

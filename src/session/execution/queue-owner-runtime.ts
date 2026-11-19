@@ -516,9 +516,15 @@ async function runQueueOwnerRuntime(
             timeoutMs,
             { key: "model" },
           ),
-        setSessionConfigOption: async (configId: string, value: string, timeoutMs?: number) => {
+        setSessionConfigOption: async (
+          configId: string,
+          value: string,
+          timeoutMs?: number,
+          cliModelInput?: true,
+        ) => {
           return await controls.run(
-            (context, deadline) => context.setSessionConfigOption(configId, value, deadline),
+            (context, deadline) =>
+              context.setSessionConfigOption(configId, value, deadline, cliModelInput),
             timeoutMs,
             { key: configId },
           );

@@ -149,6 +149,18 @@ export function resolveRequestedModelId(params: {
   return candidates.length === 1 ? candidates[0] : params.requestedModel;
 }
 
+/** CLI argument intent is distinct from opaque embedded/API request values. */
+export function normalizeCliConfigOptionValue(params: {
+  configId: string;
+  value: string;
+  models: SessionModelState | undefined;
+  cliModelInput?: true;
+}): string {
+  return params.cliModelInput === true && params.models?.configId === params.configId
+    ? params.value.trim()
+    : params.value;
+}
+
 export function resolveRequestedConfigOption(params: {
   configId: string;
   value: string;

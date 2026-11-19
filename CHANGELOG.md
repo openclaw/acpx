@@ -46,6 +46,8 @@ Repo: https://github.com/openclaw/acpx
 - Sessions/list: preserve accepted opaque pagination cursors without trimming them. Thanks @saariuslystoned.
 - CLI: identify missing or non-file prompt, flow, and flow-input paths while preserving exit codes and JSON error envelopes. Thanks @KrasimirKralev.
 
+- CLI: preserve surrounding whitespace in advertised non-model configuration values while retaining model normalization; refuse dedicated CLI controls against older incompatible queue owners instead of silently changing the request. Thanks @Footloose9.
+
 ## 0.22.0 - 2026-11-06
 
 **Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.
