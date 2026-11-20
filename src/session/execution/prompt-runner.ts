@@ -1,4 +1,8 @@
-import { resolveRequestedConfigOption, resolveRequestedModelId } from "../../acp/model-support.js";
+import {
+  normalizeConfigOptionValue,
+  resolveRequestedConfigOption,
+  resolveRequestedModelId,
+} from "../../acp/model-support.js";
 import { TimeoutError, withTimeout } from "../../async-control.js";
 import {
   withConnectedSession,
@@ -155,20 +159,25 @@ export async function runSessionSetConfigOptionDirect(
       { ...options, replacingConfigOption: { key: options.configId } },
       async ({ client, sessionId, record }) => {
         const models = advertisedModelState(record.acpx);
-        const { modelConfigId, resolvedValue } = resolveRequestedConfigOption({
+        const dispatchValue = normalizeConfigOptionValue({
           configId: options.configId,
           value: options.value,
+          models,
+        });
+        const { modelConfigId, resolvedValue } = resolveRequestedConfigOption({
+          configId: options.configId,
+          value: dispatchValue,
           models,
           agentCommand: record.agentCommand,
         });
         const response = await withTimeout(
-          client.setSessionConfigOption(sessionId, options.configId, options.value, models),
+          client.setSessionConfigOption(sessionId, options.configId, dispatchValue, models),
           options.timeoutMs,
         );
         record.acpx = applyConfigOptionSelection(
           record.acpx,
           options.configId,
-          options.value,
+          dispatchValue,
           response,
           modelConfigId,
           resolvedValue,

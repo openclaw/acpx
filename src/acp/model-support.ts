@@ -165,6 +165,20 @@ export function resolveRequestedConfigOption(params: {
   };
 }
 
+/**
+ * CLI model-selector normalization. Trims a config value only when it targets
+ * the *connected* model control; every other value is returned as typed so
+ * whitespace-sensitive non-model identifiers are preserved. The runtime API
+ * keeps its exact-id contract and does not go through this helper.
+ */
+export function normalizeConfigOptionValue(params: {
+  configId: string;
+  value: string;
+  models: SessionModelState | undefined;
+}): string {
+  return params.models?.configId === params.configId ? params.value.trim() : params.value;
+}
+
 function isCursorAcpCommandForModelAlias(agentCommand: string | undefined): boolean {
   if (!agentCommand) {
     return false;

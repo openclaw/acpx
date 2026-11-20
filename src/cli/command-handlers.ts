@@ -1,6 +1,7 @@
 import path from "node:path";
 import { Command, InvalidArgumentError } from "commander";
 import { isLegacyZedCodexAcpInvocation } from "../acp/codex-compat.js";
+import { normalizeConfigOptionValue } from "../acp/model-support.js";
 import { AcpxOperationalError, AgentSpawnError } from "../errors.js";
 import type { SessionListResult } from "../session/execution/contracts.js";
 import { exportSession } from "../session/export.js";
@@ -570,8 +571,11 @@ export async function handleSetConfigOption(
   // one: the advertised ids are exact strings, so a typed selector is trimmed
   // before it leaves the CLI. Every other value travels as typed, including to
   // an owner that predates the ownership of this normalization.
-  const dispatchValue =
-    advertisedModelState(record.acpx)?.configId === resolvedConfigId ? value.trim() : value;
+  const dispatchValue = normalizeConfigOptionValue({
+    configId: resolvedConfigId,
+    value,
+    models: advertisedModelState(record.acpx),
+  });
   const result = await setSessionConfigOption({
     ...sessionConnectionOptions(globalFlags, config),
     sessionId: record.acpxRecordId,

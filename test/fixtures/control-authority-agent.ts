@@ -31,12 +31,16 @@ function modelIds(): string[] {
     : ["default-model", "first-model", "second-model", "gpt-5.6-luna"];
 }
 
+function modelConfigId(): string {
+  return existsSync(path.join(directory, "rename-model-control")) ? "llm2" : "llm";
+}
+
 function configOptions(): SessionConfigOption[] {
   return [
     ...(route === "config" && !existsSync(path.join(directory, "remove-model-control"))
       ? [
           {
-            id: "llm",
+            id: modelConfigId(),
             name: "Model",
             category: "model",
             type: "select" as const,
@@ -202,7 +206,7 @@ const agent: Agent = {
       throw new Error("Expected string config value");
     }
     await control("session/set_config_option", value, () => {
-      if (configId === "llm") {
+      if (configId === modelConfigId()) {
         model = value;
         if (existsSync(path.join(directory, "parameterized-models"))) {
           effort = "low";
