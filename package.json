@@ -103,17 +103,17 @@
     "fast-json-patch": "^3.1.1",
     "husky": "^9.1.7",
     "lint-staged": "^17.6.0",
-    "markdownlint-cli2": "^0.24.0",
+    "markdownlint-cli2": "^0.24.1",
     "oxfmt": "^0.78.0",
     "oxlint": "^1.89.0",
-    "oxlint-tsgolint": "^7.0.2005",
+    "oxlint-tsgolint": "^7.0.2007",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-test-renderer": "^19.3.1",
     "tsdown": "^0.23.4",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "vite": "^8.3.5",
-    "ws": "^8.22.1"
+    "vite": "^8.3.8",
+    "ws": "^8.23.0"
   },
   "lint-staged": {
     "*.{js,ts}": [
@@ -127,5 +127,5 @@
   "engines": {
     "node": ">=22.13.0"
   },
-  "packageManager": "pnpm@11.27.1"
+  "packageManager": "pnpm@11.28.12"
 }
