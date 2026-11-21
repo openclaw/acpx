@@ -267,14 +267,14 @@ export async function ensureCopilotAcpSupport(
 
 export function buildClaudeCodeOptionsMeta(
   options: AcpClientOptions["sessionOptions"],
-  isolateUserSettings = false,
+  claudeAcp = false,
 ): Record<string, unknown> | undefined {
   const claudeCodeOptions: Record<string, unknown> = {};
-  if (isolateUserSettings) {
+  if (claudeAcp) {
     claudeCodeOptions.settingSources = resolveClaudeCodeSettingSources();
   }
   if (options) {
-    assignClaudeCodeOptions(claudeCodeOptions, options);
+    assignClaudeCodeOptions(claudeCodeOptions, options, claudeAcp);
   }
 
   const meta: Record<string, unknown> = {};
@@ -301,8 +301,13 @@ export function resolveClaudeCodeSettingSources(env: NodeJS.ProcessEnv = process
 function assignClaudeCodeOptions(
   target: Record<string, unknown>,
   options: NonNullable<AcpClientOptions["sessionOptions"]>,
+  claudeAcp: boolean,
 ): void {
-  if (typeof options.model === "string" && options.model.trim().length > 0) {
+  if (
+    typeof options.model === "string" &&
+    options.model.trim().length > 0 &&
+    (!claudeAcp || options.model.trim() !== "default")
+  ) {
     target.model = options.model;
   }
   if (Array.isArray(options.allowedTools)) {

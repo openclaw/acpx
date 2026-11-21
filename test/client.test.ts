@@ -1054,6 +1054,19 @@ for (const scenario of [
     meta: { claudeCode: { options: { settingSources: ["project", "local"] } } },
   },
   {
+    name: "AcpClient omits Claude's default model sentinel from session metadata",
+    options: {
+      agentCommand: "npx -y @agentclientprotocol/claude-agent-acp",
+      sessionOptions: { model: "default" },
+    },
+    meta: { claudeCode: { options: { settingSources: ["project", "local"] } } },
+  },
+  {
+    name: "AcpClient preserves a non-Claude model named default",
+    options: { sessionOptions: { model: "default" } },
+    meta: { claudeCode: { options: { model: "default" } } },
+  },
+  {
     name: "AcpClient createSession forwards systemPrompt string in _meta",
     options: { sessionOptions: { systemPrompt: "you are an obsidian assistant" } },
     meta: { systemPrompt: "you are an obsidian assistant" },
@@ -1096,7 +1109,12 @@ for (const method of ["load", "resume"] as const) {
     const fixture = createClientFixture(t, {
       client: {
         agentCommand: "npx -y @agentclientprotocol/claude-agent-acp",
-        sessionOptions: { allowedTools: ["Read"], maxTurns: 5, systemPrompt: "synthetic" },
+        sessionOptions: {
+          model: "default",
+          allowedTools: ["Read"],
+          maxTurns: 5,
+          systemPrompt: "synthetic",
+        },
       },
     });
     const cwd = path.resolve("/tmp/acpx-client-meta");
