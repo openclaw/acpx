@@ -478,6 +478,19 @@ test("formatPromptSessionBannerLine includes routed-from path when cwd differs",
   );
 });
 
+test("formatPromptSessionBannerLine prefixes a hidden child with the current-directory component", () => {
+  const cwd = path.resolve("project");
+  const record = makeSessionRecord({
+    acpxRecordId: "hidden-child",
+    acpSessionId: "hidden-child",
+    agentCommand: "agent-a",
+    cwd,
+  });
+  const currentCwd = path.join(cwd, ".cache");
+  const line = formatPromptSessionBannerLine(record, currentCwd);
+  assert.ok(line.includes(`(routed from .${path.sep}.cache)`), line);
+});
+
 test("CLI resolves unknown subcommand names as raw agent commands", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
