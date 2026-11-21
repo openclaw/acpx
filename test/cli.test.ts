@@ -2338,6 +2338,205 @@ test("set command exits with NO_SESSION when no session exists", async () => {
   });
 });
 
+async function readRecordedRequests(
+  requestLog: string,
+): Promise<Array<{ method?: string; params?: { configId?: string; value?: unknown } }>> {
+  return (await fs.readFile(requestLog, "utf8"))
+    .trim()
+    .split("\n")
+    .map(
+      (line) =>
+        JSON.parse(line) as { method?: string; params?: { configId?: string; value?: unknown } },
+    );
+}
+
+test("set sends a non-model value exactly as given, padding included", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify({ agents: { codex: { command: MOCK_AGENT_COMMAND } } }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const sessionId = "padded-config-session";
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: sessionId,
+      acpSessionId: sessionId,
+      agentCommand: MOCK_AGENT_COMMAND,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:00:00.000Z",
+      closed: false,
+    });
+
+    const requestLog = path.join(homeDir, "requests.log");
+    const result = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "set", "verbosity", " compact "],
+      homeDir,
+      { env: { ACPX_TEST_REQUEST_LOG: requestLog } },
+    );
+    assert.equal(result.code, 0, result.stderr);
+
+    const setRequest = (await readRecordedRequests(requestLog)).find(
+      (request) => request.method === "session/set_config_option",
+    );
+    assert.ok(setRequest, "expected a session/set_config_option request");
+    assert.equal(setRequest.params?.configId, "verbosity");
+    assert.equal(setRequest.params?.value, " compact ");
+  });
+});
+
+test("set model still resolves a padded selector to the advertised model id", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    const agentCommand = `${MOCK_AGENT_COMMAND} --model-config-id model`;
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify({ agents: { codex: { command: agentCommand } } }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const sessionId = "padded-model-session";
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: sessionId,
+      acpSessionId: sessionId,
+      agentCommand,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:00:00.000Z",
+      closed: false,
+    });
+
+    const requestLog = path.join(homeDir, "requests.log");
+    const result = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "set", "model", "  gpt-5.4  "],
+      homeDir,
+      { env: { ACPX_TEST_REQUEST_LOG: requestLog } },
+    );
+    assert.equal(result.code, 0, result.stderr);
+
+    const setRequest = (await readRecordedRequests(requestLog)).find(
+      (request) => request.method === "session/set_config_option",
+    );
+    assert.ok(setRequest, "expected a session/set_config_option request");
+    assert.equal(setRequest.params?.value, "gpt-5.4");
+  });
+});
+
+test("set normalizes a padded value for a model control whose id is not model", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    const agentCommand = `${MOCK_AGENT_COMMAND} --model-config-id llm`;
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify({ agents: { codex: { command: agentCommand } } }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const sessionId = "padded-llm-session";
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: sessionId,
+      acpSessionId: sessionId,
+      agentCommand,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:00:00.000Z",
+      closed: false,
+      // The CLI identifies the model control from the catalog the last
+      // connection stored, which is what a real session record carries.
+      acpx: {
+        model_control: "config_option",
+        current_model_id: "default-model",
+        available_models: ["default-model", "smart-model"],
+        config_options: [
+          {
+            id: "llm",
+            name: "Model",
+            category: "model",
+            type: "select",
+            currentValue: "default-model",
+            options: [
+              { value: "default-model", name: "Default" },
+              { value: "smart-model", name: "Smart" },
+            ],
+          },
+        ],
+      },
+    });
+
+    const requestLog = path.join(homeDir, "requests.log");
+    const result = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "set", "llm", " smart-model "],
+      homeDir,
+      { env: { ACPX_TEST_REQUEST_LOG: requestLog } },
+    );
+    assert.equal(result.code, 0, result.stderr);
+
+    const setRequest = (await readRecordedRequests(requestLog)).find(
+      (request) => request.method === "session/set_config_option",
+    );
+    assert.ok(setRequest, "expected a session/set_config_option request");
+    assert.equal(setRequest.params?.configId, "llm");
+    assert.equal(setRequest.params?.value, "smart-model");
+  });
+});
+
+test("set retries a padded selector once when the record has no catalog", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    const agentCommand = `${MOCK_AGENT_COMMAND} --model-config-id llm`;
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify({ agents: { codex: { command: agentCommand } } }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const sessionId = "catalogless-llm-session";
+    await writeSessionRecord(homeDir, {
+      acpxRecordId: sessionId,
+      acpSessionId: sessionId,
+      agentCommand,
+      cwd,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: "2026-01-01T00:00:00.000Z",
+      closed: false,
+    });
+
+    const requestLog = path.join(homeDir, "requests.log");
+    const result = await runCli(
+      ["--cwd", cwd, "--format", "json", "codex", "set", "llm", " smart-model "],
+      homeDir,
+      { env: { ACPX_TEST_REQUEST_LOG: requestLog } },
+    );
+    assert.equal(result.code, 0, result.stderr);
+
+    const setRequests = (await readRecordedRequests(requestLog)).filter(
+      (request) => request.method === "session/set_config_option",
+    );
+    assert.equal(setRequests.at(-1)?.params?.value, "smart-model");
+  });
+});
+test("set rejects a whitespace-only value before connecting", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+
+    const result = await runCli(["--cwd", cwd, "codex", "set", "verbosity", "   "], homeDir);
+
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /Config option value must not be empty/);
+  });
+});
+
 test("cancel prints nothing to cancel and exits success when no session exists", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace", "packages", "app");

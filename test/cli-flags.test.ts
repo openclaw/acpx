@@ -18,6 +18,7 @@ import {
   parseHistoryLimit,
   parseMaxTurns,
   parseNonInteractivePermissionPolicy,
+  parseNonBlankValue,
   parseNonEmptyValue,
   parseOutputFormat,
   parsePruneBeforeDate,
@@ -158,6 +159,9 @@ test("string list flag parsers normalize valid values and reject empty entries",
 
   assert.equal(parseNonEmptyValue("Model", " sonnet "), "sonnet");
   assert.throws(() => parseNonEmptyValue("Model", " "), /Model must not be empty/);
+  assert.throws(() => parseNonBlankValue("Config option value", " \t "), /must not be empty/);
+  assert.equal(parseNonBlankValue("Config option value", " compact "), " compact ");
+  assert.equal(parseNonBlankValue("Config option value", "compact"), "compact");
 
   assert.deepEqual(parseAllowedTools(""), []);
   assert.deepEqual(parseAllowedTools("   "), []);

@@ -6,6 +6,7 @@ import {
   modelStateFromConfigOptions,
   REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE,
   RequestedModelUnsupportedError,
+  resolveRequestedModelId,
 } from "../src/acp/model-support.js";
 
 function modelSelect(id: string, category?: string) {
@@ -213,4 +214,32 @@ test("Cursor model resolution preserves an exact advertised id", () => {
   });
 
   assert.equal(warning, undefined);
+});
+
+test("the shared resolver keeps an unadvertised selector exactly as given", () => {
+  // The CLI trims a model selector before it gets here; AcpClient and the
+  // runtime setters pass the caller's id through unchanged so an embedded
+  // caller still fails on " model " instead of silently selecting "model".
+  const models = {
+    configId: "model",
+    currentModelId: "model",
+    availableModels: [
+      { modelId: "model", name: "model" },
+      { modelId: "gpt-5.4", name: "GPT-5.4" },
+    ],
+  };
+  assert.equal(resolveRequestedModelId({ requestedModel: " model ", models }), " model ");
+  assert.throws(
+    () =>
+      assertRequestedModelSupported({
+        requestedModel: " model ",
+        models,
+        context: "apply",
+      }),
+    (error: unknown) => {
+      assert.ok(isRequestedModelUnsupportedError(error));
+      assert.equal(error.reason, "unadvertised-model");
+      return true;
+    },
+  );
 });
