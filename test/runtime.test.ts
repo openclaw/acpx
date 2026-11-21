@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import type { AcpControlAuthority } from "../src/async-control.js";
 import {
   AcpRuntimeError,
   AcpxRuntime,
@@ -92,6 +93,7 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   let cancelCalls = 0;
   let managerCancelCalls = 0;
   let closeDiscardPersistentState: boolean | undefined;
+  let connectArguments: unknown[] | undefined;
   let promptStarted = Promise.resolve();
   const manager = {
     ensureSession: async (input: { mode: string }) => {
@@ -138,6 +140,9 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
     }),
     setMode: async () => {},
     setConfigOption: async () => ({ configOptions: [] }),
+    connectSession: async (...args: unknown[]) => {
+      connectArguments = args;
+    },
     cancel: async () => {
       managerCancelCalls += 1;
     },
@@ -218,6 +223,14 @@ test("AcpxRuntime delegates session lifecycle to the runtime manager", async () 
   assert.deepEqual(await runtime.setConfigOption({ handle, key: "approval", value: "manual" }), {
     configOptions: [],
   });
+  const connectInput: AcpControlAuthority & { handle: typeof handle } = {
+    handle: { ...handle, acpxRecordId: undefined },
+    signal: new AbortController().signal,
+    assertActive: () => {},
+  };
+  await runtime.connectSession(connectInput);
+  assert.deepEqual(connectArguments, [handle, "oneshot", connectInput]);
+  assert.equal(connectArguments?.[2], connectInput);
   await runtime.cancel({ handle, reason: "legacy cancel" });
   await turn.closeStream({ reason: "observer closed stream" });
   await turn.cancel();

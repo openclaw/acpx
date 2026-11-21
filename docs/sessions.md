@@ -334,6 +334,11 @@ For retained sessions, status and session operations retry pending checkpoint da
 after storage recovers. Checkpoint retry saves current state without replaying the
 agent request.
 
+Call `connectSession({ handle })` to load the existing persistent session and
+retain its connection for controls and the next turn without sending a prompt.
+It accepts `signal` and `assertActive` until the connection is retained. Release
+the connection with `close()` or `shutdown()`.
+
 Call `shutdown()` when retiring a runtime. It cancels active prompts, closes owned
 connections, and waits for admitted work and probes to finish. This includes
 terminal requests that have started a child process but have not yet returned. New sessions,
