@@ -47,6 +47,7 @@ Repo: https://github.com/openclaw/acpx
 - CLI: identify missing or non-file prompt, flow, and flow-input paths while preserving exit codes and JSON error envelopes. Thanks @KrasimirKralev.
 - CLI: `prompt`, `exec` and bare `acpx <agent>` now reject an empty `--file` argument (for example an unset shell variable) with `Prompt file must not be empty` (exit 2), as `compare` already does, instead of silently reading the prompt from stdin. Thanks @KrasimirKralev.
 - CLI/terminals/flows: a working directory that is a regular file (`--cwd`, `terminal/create`, shell actions) now reports `Working directory is unavailable: <path>` instead of `ENOTDIR` on the project `.acpxrc.json` or a bare `spawn ENOTDIR`. Thanks @KrasimirKralev.
+- CLI: show hidden child directories with an explicit relative path in reused-session banners. Thanks @Dcastroro.
 
 ## 0.22.0 - 2026-11-06
 
