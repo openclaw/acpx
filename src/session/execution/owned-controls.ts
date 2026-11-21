@@ -1,5 +1,9 @@
 import type { AcpClient } from "../../acp/client.js";
-import { resolveRequestedConfigOption, resolveRequestedModelId } from "../../acp/model-support.js";
+import {
+  normalizeCliConfigOptionValue,
+  resolveRequestedConfigOption,
+  resolveRequestedModelId,
+} from "../../acp/model-support.js";
 import type { AcpControlAuthority } from "../../async-control.js";
 import { applyLifecycleSnapshotToRecord } from "../../runtime/engine/lifecycle.js";
 import { connectAndLoadSession } from "../../runtime/engine/reconnect.js";
@@ -89,8 +93,14 @@ export function createOwnedSessionControls(options: OwnedControlOptions): QueueO
         deadline,
       );
     },
-    setSessionConfigOption: async (configId, value, deadline) => {
+    setSessionConfigOption: async (configId, rawValue, deadline, cliModelInput) => {
       const models = advertisedModelState(options.record.acpx);
+      const value = normalizeCliConfigOptionValue({
+        configId,
+        value: rawValue,
+        models,
+        cliModelInput,
+      });
       const { modelConfigId, resolvedValue } = resolveRequestedConfigOption({
         configId,
         value,

@@ -74,6 +74,11 @@ export type QueueSetConfigOptionRequest = {
   timeoutMs?: number;
 };
 
+/** A distinct control kind prevents old owners from silently dropping CLI model intent. */
+export type QueueSetCliConfigOptionRequest = Omit<QueueSetConfigOptionRequest, "type"> & {
+  type: "set_cli_config_option";
+};
+
 export type QueueCloseSessionRequest = {
   type: "close_session";
   requestId: string;
@@ -87,6 +92,7 @@ export type QueueRequest =
   | QueueSetModeRequest
   | QueueSetModelRequest
   | QueueSetConfigOptionRequest
+  | QueueSetCliConfigOptionRequest
   | QueueCloseSessionRequest;
 
 export type QueueOwnerAcceptedMessage = {
@@ -436,7 +442,9 @@ function parseTypedQueueRequest(
     case "set_model":
       return parseStringFieldRequest(request, context, "set_model", "modelId");
     case "set_config_option":
-      return parseSetConfigOptionRequest(request, context);
+      return parseSetConfigOptionRequest(request, context, "set_config_option");
+    case "set_cli_config_option":
+      return parseSetConfigOptionRequest(request, context, "set_cli_config_option");
     default:
       return null;
   }
@@ -568,13 +576,14 @@ function parseStringFieldRequest<TType extends "set_mode" | "set_model">(
 function parseSetConfigOptionRequest(
   request: Record<string, unknown>,
   context: QueueRequestContext,
-): QueueSetConfigOptionRequest | null {
+  type: QueueSetConfigOptionRequest["type"] | QueueSetCliConfigOptionRequest["type"],
+): QueueSetConfigOptionRequest | QueueSetCliConfigOptionRequest | null {
   const configId = parseNonEmptyString(request.configId);
   const value = parseNonEmptyString(request.value);
-  if (!configId || !value) {
+  if (!configId || !value || request.cliModelInput !== undefined) {
     return null;
   }
-  return { type: "set_config_option", ...context, configId, value };
+  return { type, ...context, configId, value };
 }
 
 function parseNonEmptyString(value: unknown): string | null {

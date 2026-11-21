@@ -48,6 +48,8 @@ Repo: https://github.com/openclaw/acpx
 - CLI: `prompt`, `exec` and bare `acpx <agent>` now reject an empty `--file` argument (for example an unset shell variable) with `Prompt file must not be empty` (exit 2), as `compare` already does, instead of silently reading the prompt from stdin. Thanks @KrasimirKralev.
 - CLI/terminals/flows: a working directory that is a regular file (`--cwd`, `terminal/create`, shell actions) now reports `Working directory is unavailable: <path>` instead of `ENOTDIR` on the project `.acpxrc.json` or a bare `spawn ENOTDIR`. Thanks @KrasimirKralev.
 
+- CLI: preserve surrounding whitespace in advertised non-model configuration values while retaining model normalization; refuse dedicated CLI controls against older incompatible queue owners instead of silently changing the request. Thanks @Footloose9.
+
 ## 0.22.0 - 2026-11-06
 
 **Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.

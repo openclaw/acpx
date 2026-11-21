@@ -32,6 +32,7 @@ import {
   type QueueOwnerSetModeResultMessage,
   type QueueRequest,
   type QueueSetConfigOptionRequest,
+  type QueueSetCliConfigOptionRequest,
   type QueueSetModelRequest,
   type QueueSetModeRequest,
   type QueueSubmitRequest,
@@ -634,9 +635,31 @@ async function submitSetConfigOptionToQueueOwner(
   value: string,
   timeoutMs?: number,
   assertDispatch?: () => void,
+  cliModelInput?: true,
 ): Promise<SetSessionConfigOptionResponse | undefined> {
-  const request: QueueSetConfigOptionRequest = {
-    type: "set_config_option",
+  // Reconcile a stale owner before selecting a protocol. An older live owner
+  // can still accept the original request for values unchanged by CLI trimming.
+  // Whitespace-sensitive values require the new capability; never replay an
+  // admitted mutation or weaken owner-generation/request-ID correlation.
+  let useCliControl = cliModelInput === true;
+  if (useCliControl) {
+    const currentOwner = await resolveUsableQueueOwner(owner.sessionId, owner);
+    if (!currentOwner) {
+      return undefined;
+    }
+    owner = currentOwner;
+    if (owner.supportsCliConfigOptionIntent !== true) {
+      if (value !== value.trim()) {
+        throw new QueueConnectionError(
+          "Running queue owner cannot preserve this CLI config value; wait for the older owner to exit, then retry without closing the session. Closing ends the session and requires creating a new one.",
+          { detailCode: "QUEUE_CLI_CONFIG_OWNER_UNSUPPORTED", origin: "queue", retryable: false },
+        );
+      }
+      useCliControl = false;
+    }
+  }
+  const request: QueueSetConfigOptionRequest | QueueSetCliConfigOptionRequest = {
+    type: useCliControl ? "set_cli_config_option" : "set_config_option",
     requestId: randomUUID(),
     ownerGeneration: owner.ownerGeneration,
     configId,
@@ -874,6 +897,7 @@ export async function trySetConfigOptionOnRunningOwner(
   timeoutMs: number | undefined,
   verbose: boolean | undefined,
   assertDispatch?: () => void,
+  cliModelInput?: true,
 ): Promise<OwnerControlResult<SetSessionConfigOptionResponse> | undefined> {
   return await tryControlOnRunningOwner({
     sessionId,
@@ -883,7 +907,14 @@ export async function trySetConfigOptionOnRunningOwner(
     submit: (owner) =>
       withOwnerControlPersistence(
         owner,
-        submitSetConfigOptionToQueueOwner(owner, configId, value, timeoutMs, assertDispatch),
+        submitSetConfigOptionToQueueOwner(
+          owner,
+          configId,
+          value,
+          timeoutMs,
+          assertDispatch,
+          cliModelInput,
+        ),
       ),
   });
 }

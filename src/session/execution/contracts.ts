@@ -146,6 +146,7 @@ export type SessionCancelResult = {
 /** Identifies a session control request that only a running queue owner serves. */
 export type SessionControlOwnerOptions = {
   sessionId: string;
+  cliModelInput?: true;
   timeoutMs?: number;
   verbose?: boolean;
   /**
@@ -169,6 +170,7 @@ export type SessionSetConfigOptionOptions = {
   sessionId: string;
   configId: string;
   value: string;
+  cliModelInput?: true;
 } & SessionConnectionOptions;
 
 export type SessionCreateWithClientResult = {
