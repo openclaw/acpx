@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  NODE_VERSION: 24.22.1
+  NODE_VERSION: 24.22.3
 
 jobs:
   scope:
@@ -117,16 +117,16 @@ jobs:
           - name: Conformance Smoke
             command: pnpm run conformance:run -- --case acp.v1.initialize.handshake
           - name: Test
-            node_version: 22.23.4
+            node_version: 22.23.5
             command: pnpm run test:coverage
           - name: Test (Node 24)
-            node_version: 24.22.1
+            node_version: 24.22.3
             command: pnpm run test
           - name: Test (Node 26)
-            node_version: 26.12.1
+            node_version: 26.13.1
             command: pnpm run test
           - name: Mutation
-            node_version: 22.23.4
+            node_version: 22.23.5
             command: pnpm run mutate
           - name: Slophammer
             command: |
