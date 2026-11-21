@@ -228,3 +228,16 @@ test("--file names a missing or non-file prompt path for exec, prompt and compar
     }
   });
 });
+
+test("an empty --file value is rejected instead of falling back to stdin", async () => {
+  await fixture(async (_home, execute) => {
+    for (const command of [["exec"], ["prompt"], ["codex"], ["compare", "codex", "claude"]]) {
+      for (const flag of [["--file", ""], ["--file="], ["-f", " "]]) {
+        const result = await execute([...command, ...flag], "PIPED_STDIN 🦞 prompt");
+        assert.equal(result.code, 2, `${command[0]} ${flag.join(" ")}: ${result.stderr}`);
+        assert.match(result.stderr, /Prompt file must not be empty/);
+        assert.doesNotMatch(result.stdout, /PIPED_STDIN/);
+      }
+    }
+  });
+});

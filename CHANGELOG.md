@@ -45,6 +45,7 @@ Repo: https://github.com/openclaw/acpx
 - Sessions/watch: keep read contents suppressed when opposite-direction requests reuse an RPC ID. Thanks @saariuslystoned.
 - Sessions/list: preserve accepted opaque pagination cursors without trimming them. Thanks @saariuslystoned.
 - CLI: identify missing or non-file prompt, flow, and flow-input paths while preserving exit codes and JSON error envelopes. Thanks @KrasimirKralev.
+- CLI: `prompt`, `exec` and bare `acpx <agent>` now reject an empty `--file` argument (for example an unset shell variable) with `Prompt file must not be empty` (exit 2), as `compare` already does, instead of silently reading the prompt from stdin. Thanks @KrasimirKralev.
 
 ## 0.22.0 - 2026-11-06
 
