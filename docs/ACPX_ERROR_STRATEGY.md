@@ -92,7 +92,8 @@ Agent-spawn policy:
 - use `detailCode=AGENT_SPAWN_ENOENT` when process creation fails with `ENOENT`
 - describe the missing launch path without assuming it is always the command binary; the executable, interpreter, or working directory may be absent
 - add best-effort observations from the prepared command, working directory, and child environment; retain the checklist when lookup is inconclusive, including an existing wrapper with a missing interpreter
-- leave non-`ENOENT` spawn failures on the generic runtime path
+- describe an `ENOTDIR` spawn failure (a regular file used as the working directory) the same way, without the `AGENT_SPAWN_ENOENT` detail code
+- leave other spawn failures on the generic runtime path
 
 ## Queue detail codes (initial set)
 

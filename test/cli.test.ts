@@ -660,6 +660,19 @@ test(
           `Working directory is unavailable: ${path.join(homeDir, "missing-workspace")}.`,
         ),
       );
+
+      const fileCwd = path.join(homeDir, "workspace-file");
+      await fs.writeFile(fileCwd, "not a directory\n");
+      const fileCwdText = await runCli(
+        ["--cwd", fileCwd, "--agent", process.execPath, "exec", "ping"],
+        homeDir,
+      );
+      assert.equal(fileCwdText.code, 1);
+      assert(
+        fileCwdText.stderr.includes(`Working directory is unavailable: ${fileCwd}.`),
+        fileCwdText.stderr,
+      );
+      assert.doesNotMatch(fileCwdText.stderr, /\.acpxrc\.json/);
     });
   },
 );

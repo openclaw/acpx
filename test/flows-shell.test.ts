@@ -456,20 +456,31 @@ test("shell spawn ENOENT identifies the actual missing shell and retains its cau
   );
 });
 
-test("shell spawn ENOENT names a missing working directory instead of the command", async () => {
+test("shell spawn names a missing or regular-file working directory instead of the command", async () => {
   const missingCwd = path.join(os.tmpdir(), `acpx-missing-cwd-${process.pid}-${Date.now()}`);
-  for (const shell of [undefined, true]) {
-    await assert.rejects(
-      runShellAction({ command: process.execPath, args: ["-v"], cwd: missingCwd, shell }),
-      (error: NodeJS.ErrnoException) => {
-        assert.equal(error.code, "ENOENT");
-        assert.ok(
-          error.message.includes(`Working directory is unavailable: ${missingCwd}. `),
-          error.message,
+  const fileCwd = `${missingCwd}-file`;
+  await fs.writeFile(fileCwd, "not a directory\n");
+  try {
+    for (const [cwd, code] of [
+      [missingCwd, "ENOENT"],
+      [fileCwd, "ENOTDIR"],
+    ]) {
+      for (const shell of [undefined, true]) {
+        await assert.rejects(
+          runShellAction({ command: process.execPath, args: ["-v"], cwd, shell }),
+          (error: NodeJS.ErrnoException) => {
+            assert.equal(error.code, code);
+            assert.ok(
+              error.message.includes(`Working directory is unavailable: ${cwd}. `),
+              error.message,
+            );
+            return true;
+          },
         );
-        return true;
-      },
-    );
+      }
+    }
+  } finally {
+    await fs.rm(fileCwd, { force: true });
   }
 });
 

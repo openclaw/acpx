@@ -706,10 +706,11 @@ async function spawnAndWait(
   // ACP terminal/create is a permission-gated command-execution surface.
   // CodeQL otherwise treats the intentional shell fallback as accidental injection.
   assertControlAuthority(authority);
-  // codeql[js/shell-command-injection-from-environment]
-  // lgtm[js/shell-command-injection-from-environment]
-  const proc = spawn(spawnCommand.command, spawnCommand.args, spawnOptions);
+  let proc;
   try {
+    // codeql[js/shell-command-injection-from-environment]
+    // lgtm[js/shell-command-injection-from-environment]
+    proc = spawn(spawnCommand.command, spawnCommand.args, spawnOptions);
     await waitForSpawn(proc);
   } catch (error) {
     throw describeSpawnEnoent(error, "", {

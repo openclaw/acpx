@@ -359,7 +359,8 @@ async function readConfigFile(filePath: string): Promise<ConfigFileShape | undef
     }
     return parsed;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
       return undefined;
     }
     throw error;

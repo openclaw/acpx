@@ -279,6 +279,22 @@ test("loadResolvedConfig rejects a missing explicit MCP config path", async () =
   });
 });
 
+test("loadResolvedConfig treats config paths under a regular file as absent", async () => {
+  await withTempEnv(async ({ homeDir }) => {
+    const fileCwd = path.join(homeDir, "workspace-file");
+    await fs.writeFile(fileCwd, "not a directory\n");
+
+    const config = await loadResolvedConfig(fileCwd);
+    assert.equal(config.projectPath, path.join(fileCwd, ".acpxrc.json"));
+    assert.equal(config.hasProjectConfig, false);
+
+    await assert.rejects(
+      () => loadResolvedConfig(homeDir, { mcpConfigPath: "workspace-file/mcp.json" }),
+      /MCP config file not found: .*workspace-file[\\/]mcp\.json/,
+    );
+  });
+});
+
 test("initGlobalConfigFile creates the config once and then reports existing file", async (t) => {
   const previousUmask = process.umask(0o002);
   t.after(() => process.umask(previousUmask));
