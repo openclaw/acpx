@@ -11,6 +11,7 @@ import {
   resolveRequestedConfigOption,
   type SessionModelState,
 } from "../../acp/model-support.js";
+import { isOpenClawAcpAgent } from "../../acp/openclaw-session.js";
 import {
   assertControlAuthority,
   InterruptedError,
@@ -801,6 +802,16 @@ async function loadOrCreateRuntimeSession(params: {
       resumed: true,
       createdFreshSession: false,
     };
+  }
+
+  if (
+    isOpenClawAcpAgent(
+      params.record.agentCommand,
+      params.record.agentArgv,
+      params.client.initializeResult?.agentInfo?.name,
+    )
+  ) {
+    return await loadRuntimeSession({ ...params, sameSessionOnly: true, strictResume: true }, true);
   }
 
   if (params.client.supportsResumeSession()) {
