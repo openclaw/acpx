@@ -1124,6 +1124,89 @@ for (const method of ["load", "resume"] as const) {
   });
 }
 
+for (const method of ["new", "load", "resume"] as const) {
+  test(`AcpClient session request metadata customizes session/${method} without replacing protocol fields`, async (t) => {
+    const contexts: unknown[] = [];
+    const metadata = {
+      claudeCode: { options: { tools: [], settingSources: [], persistSession: false } },
+      cwd: "metadata-only",
+    };
+    const fixture = createClientFixture(t, {
+      client: {
+        agentCommand: "npx -y @agentclientprotocol/claude-agent-acp",
+        sessionOptions: { systemPrompt: "keep this prompt" },
+        sessionRequestMeta: (context) => {
+          contexts.push(context);
+          return metadata;
+        },
+      },
+    });
+    const cwd = path.resolve("/tmp/acpx-client-meta");
+    const pending = fixture.track(
+      method === "new"
+        ? fixture.client.createSession(cwd)
+        : method === "load"
+          ? fixture.client.loadSession("existing", cwd)
+          : fixture.client.resumeSession("existing", cwd),
+    );
+    const request = await fixture.message(0);
+    assert("method" in request);
+    assert.equal(request.method, `session/${method}`);
+    assert.deepEqual(request.params, {
+      ...(method === "new" ? {} : { sessionId: "existing" }),
+      cwd,
+      mcpServers: [],
+      _meta: { systemPrompt: "keep this prompt", ...metadata },
+    });
+    assert.deepEqual(contexts, [
+      { method: `session/${method}`, ...(method === "new" ? {} : { sessionId: "existing" }) },
+    ]);
+    assert.deepEqual(metadata.claudeCode.options.settingSources, []);
+    await fixture.reply(request, method === "new" ? { sessionId: "created" } : {});
+    await pending;
+  });
+}
+
+for (const [name, metadata] of [
+  ["non-JSON value", { callback: () => {} }],
+  ["non-finite number", { count: Number.NaN }],
+  ["class instance", { date: new Date() }],
+  ["oversized object", { text: "x".repeat(256 * 1024) }],
+  ["array root", []],
+  [
+    "excessive nesting",
+    Array.from({ length: 33 }).reduce<Record<string, unknown>>((inner) => ({ inner }), {}),
+  ],
+  [
+    "circular object",
+    (() => {
+      const value: Record<string, unknown> = {};
+      value.self = value;
+      return value;
+    })(),
+  ],
+] as const) {
+  test(`AcpClient session request metadata rejects ${name} before sending`, async (t) => {
+    const fixture = createClientFixture(t, {
+      client: { sessionRequestMeta: () => metadata as Record<string, unknown> },
+    });
+    await assert.rejects(fixture.client.createSession(), /sessionRequestMeta/u);
+    assert.equal(fixture.messages.length, 0);
+  });
+}
+
+test("AcpClient session request metadata propagates callback failures", async (t) => {
+  const fixture = createClientFixture(t, {
+    client: {
+      sessionRequestMeta: () => {
+        throw new Error("host policy unavailable");
+      },
+    },
+  });
+  await assert.rejects(fixture.client.createSession(), /host policy unavailable/u);
+  assert.equal(fixture.messages.length, 0);
+});
+
 test("resolveClaudeCodeSettingSources includes user settings only when explicitly enabled", () => {
   assert.deepEqual(resolveClaudeCodeSettingSources({}), ["project", "local"]);
   assert.deepEqual(resolveClaudeCodeSettingSources({ ACPX_CLAUDE_INCLUDE_USER_SETTINGS: "1" }), [

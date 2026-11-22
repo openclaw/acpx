@@ -88,3 +88,22 @@ const runtime = createAcpRuntime({
   agentProcessEnvAllow: ["ANTHROPIC_API_KEY", "NODE_EXTRA_CA_CERTS"],
 });
 ```
+
+## Session request metadata
+
+Embedded runtimes can supply `sessionRequestMeta(context)` to attach agent-specific
+JSON metadata to each `session/new`, `session/load`, or `session/resume` request.
+The context contains `method` and, for existing sessions, `sessionId`. The callback
+runs again on reconnect, so a host can refresh its policy without saving it in the
+session store. `inspectAgentModels` accepts the same option for its discovery session.
+
+Return `undefined` to keep generated metadata, or a plain JSON object of at most
+256 KiB and 32 levels. Non-JSON values and callback failures reject the request
+before it is sent. Values replace generated metadata by top-level key: returning
+`claudeCode` replaces the entire generated `claudeCode` namespace, while an omitted
+`systemPrompt` remains intact. Standard request fields such as `cwd`, `sessionId`,
+and `mcpServers` cannot be overridden through this callback.
+
+This is trusted host configuration, not a CLI flag or stored session option.
+ACPX does not persist the callback or its result. The target agent still receives
+the metadata and may retain it according to its own storage policy.

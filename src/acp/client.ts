@@ -65,6 +65,7 @@ import { getUnsupportedPromptContentMessage, textPrompt } from "../prompt-conten
 import { buildAgentSpawnCommand, buildSpawnCommandOptions } from "../spawn-command-options.js";
 import type {
   AcpClientOptions,
+  AcpSessionRequestContext,
   AcpElicitationHandler,
   AcpPermissionHandler,
   AcpElicitationMode,
@@ -138,6 +139,7 @@ import {
   formatSessionControlAcpSummary,
   maybeWrapSessionControlError,
 } from "./session-control-errors.js";
+import { validateSessionRequestMeta } from "./session-request-meta.js";
 import { TerminalManager } from "./terminal-manager.js";
 
 export { buildSpawnCommandOptions };
@@ -1183,15 +1185,19 @@ export class AcpClient {
     });
   }
 
-  private sessionMeta(): Record<string, unknown> | undefined {
+  private sessionMeta(context: AcpSessionRequestContext): Record<string, unknown> | undefined {
     const { command, args } = resolveAgentCommandParts(
       this.options.agentCommand,
       this.options.agentArgv,
     );
-    return buildClaudeCodeOptionsMeta(
+    const generated = buildClaudeCodeOptionsMeta(
       this.options.sessionOptions,
       isClaudeAcpCommand(command, args),
     );
+    const custom = this.options.sessionRequestMeta?.(context);
+    return custom === undefined
+      ? generated
+      : { ...generated, ...validateSessionRequestMeta(custom) };
   }
 
   async createSession(
@@ -1214,7 +1220,7 @@ export class AcpClient {
           connection.agent.request(methods.agent.session.new, {
             cwd: sessionCwd,
             mcpServers: this.options.mcpServers ?? [],
-            _meta: this.sessionMeta(),
+            _meta: this.sessionMeta({ method: "session/new" }),
           }),
         authority,
       );
@@ -1271,7 +1277,7 @@ export class AcpClient {
             sessionId,
             cwd: sessionCwd,
             mcpServers: this.options.mcpServers ?? [],
-            _meta: this.sessionMeta(),
+            _meta: this.sessionMeta({ method: "session/load", sessionId }),
           }),
         options.authority,
       );
@@ -1304,7 +1310,7 @@ export class AcpClient {
           sessionId,
           cwd: sessionCwd,
           mcpServers: this.options.mcpServers ?? [],
-          _meta: this.sessionMeta(),
+          _meta: this.sessionMeta({ method: "session/resume", sessionId }),
         }),
       authority,
     );

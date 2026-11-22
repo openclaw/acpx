@@ -8,6 +8,7 @@ import {
   AcpxRuntime,
   createAcpRuntime,
   createAgentRegistry,
+  inspectAgentModels,
   type AcpRuntimeHandle,
   type AcpRuntimeOptions,
   type AcpRuntimeTurn,
@@ -142,6 +143,63 @@ test("one runtime isolates concurrent session servers and turn permission callba
         assert.equal(agentCommand.startsWith(process.execPath), true);
         assert.equal(agentArgv?.[0], process.execPath);
         return [{ name: sessionKey, command: "fixture-tool", args: [], env: [] }];
+      },
+    },
+  );
+});
+
+test("model inspection resolves transient session request metadata", async () => {
+  const contexts: unknown[] = [];
+  await withTempDir("acpx-model-meta-", async (cwd) => {
+    await inspectAgentModels({
+      agentCommand: [process.execPath, MOCK_AGENT_PATH, "--advertise-models"],
+      cwd,
+      sessionRequestMeta: (context) => {
+        contexts.push(context);
+        return { policy: "discovery" };
+      },
+    });
+  });
+  assert.deepEqual(contexts, [{ method: "session/new" }]);
+});
+
+test("session request metadata refreshes on reconnect without entering stored state", async () => {
+  let revision = 1;
+  const contexts: unknown[] = [];
+  const requests: unknown[] = [];
+  await withRuntime(
+    async ({ runtime, ensure, options, store }) => {
+      const handle = await ensure("metadata");
+      await runtime.shutdown();
+      revision = 2;
+      const restarted = createAcpRuntime(options);
+      try {
+        await restarted.setConfigOption({ handle, key: "model", value: "fast-model" });
+        const record = await store.load(handle.acpxRecordId!);
+        assert.equal(JSON.stringify(record).includes("private-host-policy"), false);
+        assert.deepEqual(contexts, [
+          { method: "session/new" },
+          { method: "session/load", sessionId: handle.backendSessionId },
+        ]);
+        assert.deepEqual(requests, [{ "private-host-policy": 1 }, { "private-host-policy": 2 }]);
+      } finally {
+        await restarted.shutdown();
+      }
+    },
+    {
+      sessionRequestMeta: (context) => {
+        contexts.push(context);
+        return { "private-host-policy": revision };
+      },
+      onAcpMessage: (direction, message) => {
+        if (
+          direction === "outbound" &&
+          "method" in message &&
+          ["session/new", "session/load", "session/resume"].includes(message.method)
+        ) {
+          const params = message.params as Record<string, unknown>;
+          requests.push(params._meta);
+        }
       },
     },
   );
