@@ -25,10 +25,7 @@ import {
   waitMs,
 } from "../queue/ipc.js";
 import { QueueLeaseGuardSettlementError } from "../queue/lease-mutation.js";
-import {
-  agentProcessEnvironmentFingerprint,
-  refreshQueueOwnerLease,
-} from "../queue/lease-store.js";
+import { refreshQueueOwnerLease } from "../queue/lease-store.js";
 import { QueueOwnerTurnController } from "../queue/owner-turn-controller.js";
 import {
   DEFAULT_QUEUE_OWNER_TTL_MS,
@@ -68,7 +65,6 @@ async function submitToRunningOwner(
     prompt: options.prompt,
     mcpConfigPath: options.mcpConfigPath,
     mcpConfigFingerprint: options.mcpConfigFingerprint,
-    agentEnvFingerprint: agentProcessEnvironmentFingerprint(options.agentProcessEnvironment),
     permissionMode: options.permissionMode,
     resumePolicy: options.resumePolicy,
     nonInteractivePermissions: options.nonInteractivePermissions,
@@ -348,7 +344,6 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     const lease = await tryAcquireQueueOwnerLease(options.sessionId, {
       path: options.mcpConfigPath,
       fingerprint: options.mcpConfigFingerprint,
-      agentEnvFingerprint: agentProcessEnvironmentFingerprint(options.agentProcessEnvironment),
     });
     if (!lease) {
       return;

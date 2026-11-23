@@ -20,7 +20,6 @@ import {
   terminateQueueOwnerForSession,
 } from "../src/session/queue/ipc.js";
 import {
-  agentProcessEnvironmentFingerprint,
   isProcessAlive,
   readQueueOwnerRecord,
   type QueueOwnerRecord,
@@ -1342,7 +1341,7 @@ for (const replaceOwner of [false, true]) {
   });
 }
 
-test("trySubmitToRunningOwner rejects MCP config and agent env changes for a live owner", async () => {
+test("trySubmitToRunningOwner rejects MCP config changes for a live owner", async () => {
   await withTempHome(async (homeDir) => {
     const sessionId = "submit-mcp-config-owner-mismatch";
     const keeper = await startKeeperProcess();
@@ -1372,31 +1371,6 @@ test("trySubmitToRunningOwner rejects MCP config and agent env changes for a liv
           assert(error instanceof QueueConnectionError);
           assert.equal(error.detailCode, "QUEUE_MCP_CONFIG_CONFLICT");
           assert.equal(error.retryable, false);
-          return true;
-        },
-      );
-      const agentEnvFingerprint = agentProcessEnvironmentFingerprint({
-        agentProcessEnvAllow: ["B", "A"],
-      });
-      assert.equal(
-        agentProcessEnvironmentFingerprint({ agentProcessEnvAllow: ["A", "B", "A"] }),
-        agentEnvFingerprint,
-      );
-      await assert.rejects(
-        async () =>
-          await trySubmitToRunningOwner({
-            sessionId,
-            message: "hello",
-            mcpConfigPath: "/tmp/job-mcp.json",
-            mcpConfigFingerprint: "fingerprint-v1",
-            agentEnvFingerprint,
-            permissionMode: "approve-reads",
-            outputFormatter: NOOP_OUTPUT_FORMATTER,
-            waitForCompletion: true,
-          }),
-        (error: unknown) => {
-          assert(error instanceof QueueConnectionError);
-          assert.equal(error.detailCode, "QUEUE_AGENT_ENV_CONFLICT");
           return true;
         },
       );

@@ -156,9 +156,11 @@ control what a configured agent receives:
 
 The same policy applies to probes and to terminals the agent starts, including
 agents used by `acpx flow run`. These keys apply only to agents selected by
-name; `--agent <command>` ignores them. A prompt is rejected with
-`QUEUE_AGENT_ENV_CONFLICT` when the session's running queue owner was started
-with a different policy; close the session before retrying.
+name; `--agent <command>` ignores them. Like authentication, the environment
+belongs to the session's queue owner: a prompt sent to a running owner uses the
+environment that owner started with. Sessions are identified by agent command
+and working directory, not agent name, so close the session after changing
+these keys or when switching between agents that share a command.
 
 ## Authentication
 
