@@ -21,7 +21,7 @@ import {
   type OutputPolicy,
   type PermissionMode,
 } from "../types.js";
-import type { ResolvedAcpxConfig } from "./config.js";
+import type { AgentEnvConfig, ResolvedAcpxConfig } from "./config.js";
 import { toTimerMilliseconds } from "./timer-duration.js";
 
 export type PermissionFlags = {
@@ -609,6 +609,7 @@ export function resolveAgentInvocation(
   agentName: string;
   agentCommand: string;
   agentArgv?: string[];
+  agentEnv?: AgentEnvConfig;
   cwd: string;
 } {
   const override = resolveAgentOverride(globalFlags.agent);
@@ -630,7 +631,7 @@ function resolveInvocationCommand(
   agentName: string,
   override: string | undefined,
   config: ResolvedAcpxConfig,
-): { agentCommand: string; agentArgv?: string[] } {
+): { agentCommand: string; agentArgv?: string[]; agentEnv?: AgentEnvConfig } {
   if (override !== undefined) {
     return { agentCommand: override };
   }
@@ -642,9 +643,11 @@ function resolveInvocationCommand(
       ? config.agents[canonicalAgentName]
       : undefined;
   if (configuredAgent) {
+    const { command, argv, ...agentEnv } = configuredAgent;
     return {
-      agentCommand: configuredAgent.command,
-      ...(configuredAgent.argv ? { agentArgv: [...configuredAgent.argv] } : {}),
+      agentCommand: command,
+      ...(argv ? { agentArgv: [...argv] } : {}),
+      ...(Object.keys(agentEnv).length > 0 ? { agentEnv } : {}),
     };
   }
   const agentArgv = resolveAgentArgv(agentName);

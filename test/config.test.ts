@@ -85,7 +85,12 @@ test("loadResolvedConfig merges global and project config with project priority"
           format: "quiet",
           agents: {
             custom: { command: "project-custom" },
-            extra: { command: "./bin/extra" },
+            extra: {
+              command: "./bin/extra",
+              envAllow: [],
+              envBlock: ["GH_TOKEN"],
+              env: { INJECTED: "from-config" },
+            },
           },
           auth: {
             global_method: "project-override",
@@ -118,7 +123,12 @@ test("loadResolvedConfig merges global and project config with project priority"
     assert.equal(config.format, "quiet");
     assert.deepEqual(config.agents, {
       custom: { command: "project-custom" },
-      extra: { command: "./bin/extra" },
+      extra: {
+        command: "./bin/extra",
+        envAllow: [],
+        envBlock: ["GH_TOKEN"],
+        env: { INJECTED: "from-config" },
+      },
     });
     assert.deepEqual(config.auth, {
       global_method: "project-override",

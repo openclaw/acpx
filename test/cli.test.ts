@@ -3479,6 +3479,12 @@ test("exec subcommand works when disableExec is false", async () => {
           disableExec: false,
           agents: {
             codex: { command: MOCK_AGENT_COMMAND },
+            isolated: {
+              command: MOCK_AGENT_COMMAND,
+              envAllow: ["KEPT", "BLOCKED"],
+              envBlock: ["BLOCKED"],
+              env: { INJECTED: "from-config" },
+            },
           },
         },
         null,
@@ -3494,6 +3500,27 @@ test("exec subcommand works when disableExec is false", async () => {
 
     // exec should work (exit code 0) since disableExec is false
     assert.equal(result.code, 0, result.stderr);
+
+    const expectedEnv = { KEPT: "kept", INJECTED: "from-config" };
+    const envPrompt = "env KEPT BLOCKED DROPPED INJECTED";
+    const env = { KEPT: "kept", BLOCKED: "blocked", DROPPED: "dropped" };
+    const isolatedExec = await runCli(
+      ["--cwd", cwd, "--format", "quiet", "isolated", "exec", envPrompt],
+      homeDir,
+      { env },
+    );
+    assert.equal(isolatedExec.code, 0, isolatedExec.stderr);
+    assert.deepEqual(JSON.parse(isolatedExec.stdout), expectedEnv);
+
+    const created = await runCli(["--cwd", cwd, "isolated", "sessions", "new"], homeDir, { env });
+    assert.equal(created.code, 0, created.stderr);
+    const isolatedPrompt = await runCli(
+      ["--cwd", cwd, "--format", "quiet", "--ttl", "0.01", "isolated", "prompt", envPrompt],
+      homeDir,
+      { env },
+    );
+    assert.equal(isolatedPrompt.code, 0, isolatedPrompt.stderr);
+    assert.deepEqual(JSON.parse(isolatedPrompt.stdout), expectedEnv);
   });
 });
 

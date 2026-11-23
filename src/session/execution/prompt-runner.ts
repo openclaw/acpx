@@ -56,6 +56,7 @@ function buildDirectConnectedSessionOptions<T>(
     saveRecord: writeSessionRecord,
     mcpServers: options.mcpServers,
     nonInteractivePermissions: options.nonInteractivePermissions,
+    agentProcessEnvironment: options.agentProcessEnvironment,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
     fs: options.fs,

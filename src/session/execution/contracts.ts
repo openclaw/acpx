@@ -2,6 +2,7 @@ import type { AcpClient } from "../../acp/client.js";
 import type { SessionAgentOptions } from "../../runtime/engine/session-options.js";
 import type {
   AcpJsonRpcMessage,
+  AgentProcessEnvironment,
   AcpMessageDirection,
   AuthPolicy,
   ClientOperation,
@@ -22,6 +23,7 @@ import type {
 import type { SessionConfigurationOptions } from "../configuration.js";
 
 export type SessionConnectionOptions = {
+  agentProcessEnvironment?: AgentProcessEnvironment;
   mcpServers?: McpServer[];
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   authCredentials?: Record<string, string>;

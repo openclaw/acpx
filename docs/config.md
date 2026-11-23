@@ -127,6 +127,39 @@ Project config can shadow global config by re-declaring the same key:
 
 Use this to point a particular repo at a vendored or pinned adapter.
 
+### Agent environment
+
+By default, an agent inherits the whole acpx environment. Three optional keys
+control what a configured agent receives:
+
+```json
+{
+  "agents": {
+    "sandboxed": {
+      "argv": ["./bin/my-acp-server"],
+      "envAllow": ["GH_TOKEN"],
+      "envBlock": ["AWS_SECRET_ACCESS_KEY"],
+      "env": { "MY_AGENT_MODE": "ci" }
+    }
+  }
+}
+```
+
+- `envAllow`: when present, the agent inherits only process essentials (`PATH`,
+  `HOME`, locale, temp directories and similar), these names and `ACPX_AUTH_*`
+  grants. `[]` keeps only the essentials.
+- `envBlock`: names removed from the inherited environment after `envAllow`.
+  `ACPX_AUTH_*` grants are never removed.
+- `env`: string values set on the agent after `envAllow` and `envBlock` are
+  applied. Like `auth`, values written here are stored in plain text; keep
+  secrets out of project `.acpxrc.json` files that are committed.
+
+The same policy applies to probes and to terminals the agent starts, including
+agents used by `acpx flow run`. These keys apply only to agents selected by
+name; `--agent <command>` ignores them. A prompt is rejected with
+`QUEUE_AGENT_ENV_CONFLICT` when the session's running queue owner was started
+with a different policy; close the session before retrying.
+
 ## Authentication
 
 ACP `authenticate` handshakes need credentials. `acpx` resolves them from two sources, in order:
@@ -169,7 +202,7 @@ sessions.
 Other ACP-relevant behavior:
 
 - Session storage path is derived from the OS home directory (`~/.acpx/sessions`).
-- Child adapter processes inherit the current environment by default.
+- Child adapter processes inherit the current environment by default; see [Agent environment](#agent-environment) to restrict it per agent.
 - Embedded clients can persist per-session overrides through `SessionAgentOptions.env`; environment variable names retain their exact casing when saved and reloaded.
 - Some adapters look at their own env vars (e.g., `QODER_PERSONAL_ACCESS_TOKEN`) — see [Agents](agents.md) for per-adapter notes.
 

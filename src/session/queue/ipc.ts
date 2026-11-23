@@ -337,6 +337,7 @@ export type SubmitToQueueOwnerOptions = {
   prompt?: PromptInput;
   mcpConfigPath?: string;
   mcpConfigFingerprint?: string;
+  agentEnvFingerprint?: string;
   permissionMode: PermissionMode;
   resumePolicy?: SessionResumePolicy;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
@@ -699,6 +700,23 @@ function assertQueueOwnerMcpConfigMatches(
   );
 }
 
+function assertQueueOwnerAgentEnvMatches(
+  owner: QueueOwnerRecord,
+  options: SubmitToQueueOwnerOptions,
+): void {
+  if (owner.agentEnvFingerprint === options.agentEnvFingerprint) {
+    return;
+  }
+  throw new QueueConnectionError(
+    "Session queue owner uses a different agent environment policy; close the session before retrying",
+    {
+      detailCode: "QUEUE_AGENT_ENV_CONFLICT",
+      origin: "queue",
+      retryable: false,
+    },
+  );
+}
+
 function assertSharedRuntimeOwner(owner: QueueOwnerRecord): void {
   if (owner.sharedRuntime === true) {
     return;
@@ -725,6 +743,7 @@ export async function trySubmitToRunningOwner(
     assertSharedRuntimeOwner(owner);
   }
   assertQueueOwnerMcpConfigMatches(owner, options);
+  assertQueueOwnerAgentEnvMatches(owner, options);
 
   const submitted = await submitToQueueOwner(owner, options);
   if (submitted) {

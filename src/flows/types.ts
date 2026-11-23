@@ -2,6 +2,7 @@ import type { SessionConfigSelection, SessionConfiguration } from "../session/co
 import type { SessionAgentOptions } from "../session/session.js";
 import type {
   AcpJsonRpcMessage,
+  AgentProcessEnvironment,
   AcpMessageDirection,
   AuthPolicy,
   McpServer,
@@ -358,6 +359,8 @@ export type ResolvedFlowAgent = {
   agentCommand: string;
   agentArgv?: string[];
   cwd: string;
+  /** Applied when launching the agent; never written to flow run records. */
+  agentProcessEnvironment?: AgentProcessEnvironment;
 };
 
 export type FlowRunnerOptions = {

@@ -29,6 +29,7 @@ import {
   type SessionAgentOptions,
 } from "../../runtime/engine/session-options.js";
 import type {
+  AgentProcessEnvironment,
   AcpJsonRpcMessage,
   AcpMessageDirection,
   AuthPolicy,
@@ -498,6 +499,7 @@ function buildQueuedTaskRunOptions(
     resumePolicy: task.resumePolicy,
     nonInteractivePermissions: task.nonInteractivePermissions ?? options.nonInteractivePermissions,
     permissionPolicy: task.permissionPolicy,
+    agentProcessEnvironment: options.agentProcessEnvironment,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
     outputFormatter,
@@ -566,6 +568,7 @@ export async function runQueuedTask(
     mcpServers?: McpServer[];
     nonInteractivePermissions?: NonInteractivePermissionPolicy;
     permissionPolicy?: PermissionPolicy;
+    agentProcessEnvironment?: AgentProcessEnvironment;
     authCredentials?: Record<string, string>;
     authPolicy?: AuthPolicy;
     suppressSdkConsoleErrors?: boolean;
@@ -862,6 +865,7 @@ async function runOwnedSessionPrompt(options: RunSessionPromptOptions): Promise<
       permissionMode: options.permissionMode,
       nonInteractivePermissions: options.nonInteractivePermissions,
       permissionPolicy: options.permissionPolicy,
+      ...options.agentProcessEnvironment,
       authCredentials: options.authCredentials,
       authPolicy: options.authPolicy,
       fs: options.fs,
@@ -1277,6 +1281,7 @@ export async function runOnce(
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
     permissionPolicy: options.permissionPolicy,
+    ...options.agentProcessEnvironment,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
     fs: options.fs,
@@ -1483,6 +1488,7 @@ export async function sendSessionDirect(
       resumePolicy: options.resumePolicy,
       nonInteractivePermissions: options.nonInteractivePermissions,
       permissionPolicy: options.permissionPolicy,
+      agentProcessEnvironment: options.agentProcessEnvironment,
       authCredentials: options.authCredentials,
       authPolicy: options.authPolicy,
       fs: options.fs,

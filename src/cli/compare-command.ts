@@ -197,7 +197,7 @@ async function runAgentForCompare(params: {
   try {
     const agent = resolveAgentInvocation(params.agentName, params.globalFlags, params.config);
     const result = await runOnce({
-      ...sessionConnectionOptions(params.globalFlags, params.config),
+      ...sessionConnectionOptions(params.globalFlags, params.config, agent),
       agentCommand: agent.agentCommand,
       agentArgv: agent.agentArgv,
       cwd: agent.cwd,

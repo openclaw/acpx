@@ -1,4 +1,4 @@
-import { randomInt } from "node:crypto";
+import { createHash, randomInt } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { withTempFile } from "@openclaw/fs-safe/advanced";
@@ -15,6 +15,7 @@ import {
   type ProcessTableEntry,
 } from "../../process-identity.js";
 import { isProcessAlive, isProcessDefinitelyDead } from "../../process-liveness.js";
+import type { AgentProcessEnvironment } from "../../types.js";
 import type { CapturedProcessIdentity } from "../lock-owner.js";
 import { settlePendingQueueLeaseGuard, withQueueLeaseMutation } from "./lease-mutation.js";
 import { queueBaseDir, queueLockFilePath, queueSocketBaseDir, queueSocketPath } from "./paths.js";
@@ -57,6 +58,7 @@ export type QueueOwnerRecord = {
   persistsControlState?: boolean;
   mcpConfigPath?: string;
   mcpConfigFingerprint?: string;
+  agentEnvFingerprint?: string;
 };
 
 type QueueOwnerIdentity = Pick<QueueOwnerRecord, "pid" | "sessionId" | "ownerGeneration">;
@@ -68,6 +70,7 @@ export type QueueOwnerLease = QueueOwnerIdentity & {
   processIdentity?: ProcessBirthIdentity;
   mcpConfigPath?: string;
   mcpConfigFingerprint?: string;
+  agentEnvFingerprint?: string;
   updates: Promise<void>;
   released: boolean;
 };
@@ -95,10 +98,7 @@ function parseQueueOwnerRecord(raw: unknown): QueueOwnerRecord | null {
     queueDepth: record.queueDepth,
     ...(processIdentity ? { processIdentity } : {}),
     ...parseQueueOwnerCapabilities(record),
-    ...(typeof record.mcpConfigPath === "string" ? { mcpConfigPath: record.mcpConfigPath } : {}),
-    ...(typeof record.mcpConfigFingerprint === "string"
-      ? { mcpConfigFingerprint: record.mcpConfigFingerprint }
-      : {}),
+    ...pickOwnerConfigMetadata(record),
   };
   // Keep invalid custody visible to close/recovery instead of treating this as
   // a malformed reservation that can age out, or letting close miss its owner.
@@ -400,6 +400,7 @@ export async function tryAcquireQueueOwnerLease(
     | {
         path?: string;
         fingerprint?: string;
+        agentEnvFingerprint?: string;
       }
     | (() => string),
   nowIsoFactory: () => string = nowIso,
@@ -407,6 +408,10 @@ export async function tryAcquireQueueOwnerLease(
   const { mcpConfigPath, clock } = resolveLeaseArguments(mcpConfigOrNowIsoFactory, nowIsoFactory);
   const mcpConfigFingerprint = readMcpConfigFingerprint(mcpConfigOrNowIsoFactory);
   const mcpConfigMetadata = createMcpConfigMetadata(mcpConfigPath, mcpConfigFingerprint);
+  const agentEnvFingerprint =
+    typeof mcpConfigOrNowIsoFactory === "object"
+      ? mcpConfigOrNowIsoFactory.agentEnvFingerprint
+      : undefined;
   const processIdentity = await getOwnProcessIdentity();
   await ensureQueueDir();
   const lockPath = queueLockFilePath(sessionId);
@@ -422,6 +427,7 @@ export async function tryAcquireQueueOwnerLease(
     ownerGeneration,
     ...(processIdentity ? { processIdentity } : {}),
     ...mcpConfigMetadata,
+    ...(agentEnvFingerprint ? { agentEnvFingerprint } : {}),
     updates: Promise.resolve(),
     released: false,
   };
@@ -462,6 +468,7 @@ function readMcpConfigFingerprint(
     | {
         path?: string;
         fingerprint?: string;
+        agentEnvFingerprint?: string;
       }
     | (() => string)
     | undefined,
@@ -479,6 +486,46 @@ function createMcpConfigMetadata(
     ...(mcpConfigPath ? { mcpConfigPath } : {}),
     ...(mcpConfigFingerprint ? { mcpConfigFingerprint } : {}),
   };
+}
+
+const OWNER_CONFIG_METADATA_KEYS = [
+  "mcpConfigPath",
+  "mcpConfigFingerprint",
+  "agentEnvFingerprint",
+] as const;
+
+type OwnerConfigMetadata = Partial<Record<(typeof OWNER_CONFIG_METADATA_KEYS)[number], string>>;
+
+function pickOwnerConfigMetadata(source: object): OwnerConfigMetadata {
+  const metadata: OwnerConfigMetadata = {};
+  for (const key of OWNER_CONFIG_METADATA_KEYS) {
+    const value: unknown = (source as Record<string, unknown>)[key];
+    if (typeof value === "string" && value.length > 0) {
+      metadata[key] = value;
+    }
+  }
+  return metadata;
+}
+
+/** Identifies an agent environment policy without recording its values. */
+function canonicalNames(names: readonly string[] | undefined): string[] | null {
+  return names ? [...new Set(names)].toSorted() : null;
+}
+
+export function agentProcessEnvironmentFingerprint(
+  environment: AgentProcessEnvironment | undefined,
+): string | undefined {
+  if (!environment) {
+    return undefined;
+  }
+  const canonical = JSON.stringify([
+    canonicalNames(environment.agentProcessEnvAllow),
+    canonicalNames(environment.agentProcessEnvBlock),
+    environment.agentProcessEnv
+      ? Object.entries(environment.agentProcessEnv).toSorted(([a], [b]) => a.localeCompare(b))
+      : null,
+  ]);
+  return createHash("sha256").update(canonical).digest("hex");
 }
 
 async function handleLeaseCollision(sessionId: string, error: unknown): Promise<undefined> {
@@ -535,6 +582,7 @@ function resolveLeaseArguments(
     | {
         path?: string;
         fingerprint?: string;
+        agentEnvFingerprint?: string;
       }
     | (() => string)
     | undefined,
@@ -605,8 +653,7 @@ async function stageQueueOwnerRecord(
       sharedRuntime: true,
       sessionWatch: true,
       persistsControlState: true,
-      ...(lease.mcpConfigPath ? { mcpConfigPath: lease.mcpConfigPath } : {}),
-      ...(lease.mcpConfigFingerprint ? { mcpConfigFingerprint: lease.mcpConfigFingerprint } : {}),
+      ...pickOwnerConfigMetadata(lease),
     },
     publish,
   );

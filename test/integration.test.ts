@@ -927,30 +927,37 @@ test("integration: flow run preserves approve-all through persistent ACP writes"
           `      prompt: () => ${jsStringLiteral(`write ${writePath} hello`)},`,
           "      parse: (text) => ({ reply: text }),",
           "    }),",
+          "    env_check: acp({",
+          "      session: { isolated: true },",
+          '      prompt: () => "env KEPT DROPPED INJECTED",',
+          "      parse: (text) => JSON.parse(text),",
+          "    }),",
           "  },",
-          "  edges: [],",
+          '  edges: [{ from: "write_file", to: "env_check" }],',
           "});",
           "",
         ].join("\n"),
         "utf8",
       );
+      await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+      await fs.writeFile(
+        path.join(homeDir, ".acpx", "config.json"),
+        JSON.stringify({
+          defaultAgent: "isolated",
+          agents: {
+            isolated: {
+              command: LOAD_CAPABLE_MOCK_AGENT_COMMAND,
+              envAllow: ["KEPT"],
+              env: { INJECTED: "injected", UNPRINTED: "flow-secret-value" },
+            },
+          },
+        }),
+      );
 
       const result = await runCli(
-        [
-          "--agent",
-          LOAD_CAPABLE_MOCK_AGENT_COMMAND,
-          "--approve-all",
-          "--cwd",
-          cwd,
-          "--format",
-          "json",
-          "--ttl",
-          "1",
-          "flow",
-          "run",
-          flowPath,
-        ],
+        ["--approve-all", "--cwd", cwd, "--format", "json", "--ttl", "1", "flow", "run", flowPath],
         homeDir,
+        { env: { KEPT: "kept", DROPPED: "dropped" } },
       );
 
       assert.equal(result.code, 0, result.stderr);
@@ -961,8 +968,17 @@ test("integration: flow run preserves approve-all through persistent ACP writes"
           write_file?: {
             reply?: string;
           };
+          env_check?: unknown;
         };
       };
+      assert.deepEqual(payload.outputs?.env_check, { KEPT: "kept", INJECTED: "injected" });
+      const stored = await fs.readdir(path.join(homeDir, ".acpx"), { recursive: true });
+      for (const entry of stored.filter((name) => name !== "config.json")) {
+        const file = path.join(homeDir, ".acpx", entry);
+        if ((await fs.stat(file)).isFile()) {
+          assert.doesNotMatch(await fs.readFile(file, "utf8"), /flow-secret-value/, entry);
+        }
+      }
 
       assert.equal(payload.action, "flow_run_result");
       assert.equal(payload.status, "completed");

@@ -134,7 +134,7 @@ function buildSessionStartOptions(params: {
   permissionPolicy?: PermissionPolicy;
 }): Parameters<SessionModule["createSession"]>[0] {
   return {
-    ...sessionConnectionOptions(params.globalFlags, params.config),
+    ...sessionConnectionOptions(params.globalFlags, params.config, params.agent),
     agentCommand: params.agent.agentCommand,
     agentArgv: params.agent.agentArgv,
     cwd: params.agent.cwd,
@@ -260,7 +260,7 @@ export async function handlePrompt(
   await printPromptSessionBanner(record, agent.cwd, outputPolicy.format, outputPolicy.jsonStrict);
   const send = (submission: ForegroundSubmission | undefined) =>
     sendSession({
-      ...sessionConnectionOptions(globalFlags, config),
+      ...sessionConnectionOptions(globalFlags, config, agent),
       sessionId: record.acpxRecordId,
       prompt,
       mcpConfigPath: config.mcpConfigPath,
@@ -337,7 +337,7 @@ export async function handleExec(
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
 
   const result = await runOnce({
-    ...sessionConnectionOptions(globalFlags, config),
+    ...sessionConnectionOptions(globalFlags, config, agent),
     agentCommand: agent.agentCommand,
     agentArgv: agent.agentArgv,
     cwd: agent.cwd,
@@ -496,7 +496,7 @@ export async function handleSetMode(
     resolveSessionNameFromFlags(flags, command),
   );
   const result = await setSessionMode({
-    ...sessionConnectionOptions(globalFlags, config),
+    ...sessionConnectionOptions(globalFlags, config, agent),
     sessionId: record.acpxRecordId,
     modeId,
   });
@@ -527,7 +527,7 @@ export async function handleSetModel(
     resolveSessionNameFromFlags(flags, command),
   );
   const result = await setSessionModel({
-    ...sessionConnectionOptions(globalFlags, config),
+    ...sessionConnectionOptions(globalFlags, config, agent),
     sessionId: record.acpxRecordId,
     modelId,
   });
@@ -564,7 +564,7 @@ export async function handleSetConfigOption(
     resolveSessionNameFromFlags(flags, command),
   );
   const result = await setSessionConfigOption({
-    ...sessionConnectionOptions(globalFlags, config),
+    ...sessionConnectionOptions(globalFlags, config, agent),
     sessionId: record.acpxRecordId,
     configId: resolvedConfigId,
     value,
@@ -590,7 +590,7 @@ async function tryListAgentSessions(
   const { listAgentSessions } = await loadSessionModule();
   try {
     return await listAgentSessions({
-      ...sessionConnectionOptions(globalFlags, config),
+      ...sessionConnectionOptions(globalFlags, config, agent),
       agentCommand: agent.agentCommand,
       agentArgv: agent.agentArgv,
       cwd: agent.cwd,

@@ -25,7 +25,10 @@ import {
   waitMs,
 } from "../queue/ipc.js";
 import { QueueLeaseGuardSettlementError } from "../queue/lease-mutation.js";
-import { refreshQueueOwnerLease } from "../queue/lease-store.js";
+import {
+  agentProcessEnvironmentFingerprint,
+  refreshQueueOwnerLease,
+} from "../queue/lease-store.js";
 import { QueueOwnerTurnController } from "../queue/owner-turn-controller.js";
 import {
   DEFAULT_QUEUE_OWNER_TTL_MS,
@@ -65,6 +68,7 @@ async function submitToRunningOwner(
     prompt: options.prompt,
     mcpConfigPath: options.mcpConfigPath,
     mcpConfigFingerprint: options.mcpConfigFingerprint,
+    agentEnvFingerprint: agentProcessEnvironmentFingerprint(options.agentProcessEnvironment),
     permissionMode: options.permissionMode,
     resumePolicy: options.resumePolicy,
     nonInteractivePermissions: options.nonInteractivePermissions,
@@ -96,6 +100,7 @@ function createQueueOwnerSharedClient(
     mcpServers: options.mcpServers,
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
+    ...options.agentProcessEnvironment,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
     fs: options.fs,
@@ -343,6 +348,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     const lease = await tryAcquireQueueOwnerLease(options.sessionId, {
       path: options.mcpConfigPath,
       fingerprint: options.mcpConfigFingerprint,
+      agentEnvFingerprint: agentProcessEnvironmentFingerprint(options.agentProcessEnvironment),
     });
     if (!lease) {
       return;
@@ -566,6 +572,7 @@ async function runQueueOwnerRuntime(
             verbose: options.verbose,
             mcpServers: options.mcpServers,
             nonInteractivePermissions: options.nonInteractivePermissions,
+            agentProcessEnvironment: options.agentProcessEnvironment,
             authCredentials: options.authCredentials,
             authPolicy: options.authPolicy,
             suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,

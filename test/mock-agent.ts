@@ -1365,6 +1365,10 @@ class MockAgent implements Agent {
     if (text === "echo") {
       return "";
     }
+    if (text.startsWith("env ")) {
+      const names = text.slice("env ".length).split(" ");
+      return JSON.stringify(Object.fromEntries(names.map((name) => [name, process.env[name]])));
+    }
     if (text === "retryable-error-once") {
       return "recovered after retry";
     }
