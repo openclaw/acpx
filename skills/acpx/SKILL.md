@@ -395,7 +395,7 @@ Supported keys:
 - `ttl` (seconds)
 - `timeout` (seconds or `null`)
 - `format` (`text`, `json`, `quiet`)
-- `agents` map (`name -> { argv: [executable, ...args] }`); structured argv is required on Windows, and legacy `{ command, args }` entries migrate automatically
+- `agents` map (`name -> { argv: [executable, ...args] }`); structured argv is required on Windows, and legacy `{ command, args }` entries migrate automatically; optional `envAllow`, `envBlock`, and `env` control the agent's environment
 - `auth` map (`authMethodId -> credential`)
 
 Use `acpx config show` to inspect the resolved config and `acpx config init` to create the global template.
@@ -411,8 +411,9 @@ their own.
 Embedding hosts can set `agentProcessEnvAllow` or `agentProcessEnvBlock` on
 `createAcpRuntime()` to keep parent variables, such as the host's own service
 credentials, out of agents, command probes, and ACP terminals. Both are off by
-default and the CLI does not set them, so without them children inherit the
-whole environment as before.
+default, so without them children inherit the whole environment as before. CLI
+users set the same lists for a configured agent with its `envAllow` and
+`envBlock` config keys.
 
 - `agentProcessEnvAllow` keeps only process essentials (`PATH`, `HOME`, locale,
   temp and similar names) plus the listed names. An empty list keeps only the
