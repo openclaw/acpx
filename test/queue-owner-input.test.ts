@@ -30,6 +30,7 @@ describe("parseQueueOwnerPayload", () => {
         sessionOptions: {
           model: "fast-model",
           allowedTools: ["Read"],
+          disallowedTools: ["Bash"],
           maxTurns: 3,
           systemPrompt: "stay concise",
           env: {
@@ -66,12 +67,29 @@ describe("parseQueueOwnerPayload", () => {
     assert.deepEqual(parsed.sessionOptions, {
       model: "fast-model",
       allowedTools: ["Read"],
+      disallowedTools: ["Bash"],
       maxTurns: 3,
       systemPrompt: "stay concise",
       env: {
         GIT_AUTHOR_EMAIL: "agent@example.local",
       },
     });
+  });
+
+  it("keeps deny lists exact and rejects unreadable ones", () => {
+    const payload = (sessionOptions: unknown) =>
+      JSON.stringify({ sessionId: "session-1", permissionMode: "approve-reads", sessionOptions });
+    assert.deepEqual(parseQueueOwnerPayload(payload({ disallowedTools: [] })).sessionOptions, {
+      disallowedTools: [],
+    });
+    assert.deepEqual(parseQueueOwnerPayload(payload({ model: "fast-model" })).sessionOptions, {
+      model: "fast-model",
+    });
+    for (const disallowedTools of ["Bash", ["Bash", 7]]) {
+      assert.throws(() => parseQueueOwnerPayload(payload({ disallowedTools })), {
+        message: "queue owner payload has invalid sessionOptions.disallowedTools",
+      });
+    }
   });
 
   it("rejects invalid payloads", () => {

@@ -104,6 +104,8 @@ export type AcpRuntimeEnsureInput = {
    * record. Ignored when an existing persistent session is reused — system
    * prompts are fixed at `newSession` time, so changing them requires a
    * different sessionKey or prepareFreshSession on the prior record first.
+   * Saved options, including `disallowedTools`, are reapplied from the
+   * record whenever the reused session reconnects.
    */
   sessionOptions?: SessionAgentOptions;
 };

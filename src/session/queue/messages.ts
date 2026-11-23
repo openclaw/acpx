@@ -277,7 +277,7 @@ function parseSessionOptions(value: unknown): QueueSessionOptions | null | undef
   if (!assignSessionModel(sessionOptions, record.model)) {
     return null;
   }
-  if (!assignSessionAllowedTools(sessionOptions, record.allowedTools)) {
+  if (!assignSessionToolLists(sessionOptions, record)) {
     return null;
   }
   if (!assignSessionMaxTurns(sessionOptions, record.maxTurns)) {
@@ -304,14 +304,28 @@ function assignSessionModel(options: QueueSessionOptions, value: unknown): boole
   return true;
 }
 
-function assignSessionAllowedTools(options: QueueSessionOptions, value: unknown): boolean {
+function assignSessionToolLists(
+  options: QueueSessionOptions,
+  record: Record<string, unknown>,
+): boolean {
+  return (
+    assignSessionToolList(options, "allowedTools", record.allowedTools) &&
+    assignSessionToolList(options, "disallowedTools", record.disallowedTools)
+  );
+}
+
+function assignSessionToolList(
+  options: QueueSessionOptions,
+  key: "allowedTools" | "disallowedTools",
+  value: unknown,
+): boolean {
   if (value == null) {
     return true;
   }
   if (!Array.isArray(value) || value.some((tool) => typeof tool !== "string")) {
     return false;
   }
-  options.allowedTools = value;
+  options[key] = value;
   return true;
 }
 

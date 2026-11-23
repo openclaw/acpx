@@ -579,6 +579,54 @@ test("listSessions preserves acpx session_options", async () => {
   });
 });
 
+for (const disallowedTools of [["Bash", "WebFetch"], []]) {
+  test(`session records roundtrip a deny list of ${disallowedTools.length} tools`, () => {
+    const record = makeSessionRecord({
+      acpxRecordId: "deny-list",
+      acpSessionId: "deny-list",
+      agentCommand: "agent-a",
+      cwd: "/tmp/deny-list",
+      acpx: { session_options: { disallowed_tools: disallowedTools } },
+    });
+    const reloaded = parseSessionRecord(
+      JSON.parse(JSON.stringify(serializeSessionRecordForDisk(record))),
+    );
+    assert.deepEqual(reloaded?.acpx?.session_options, { disallowed_tools: disallowedTools });
+  });
+}
+
+test("session records without a deny list stay without one", () => {
+  const record = makeSessionRecord({
+    acpxRecordId: "no-deny-list",
+    acpSessionId: "no-deny-list",
+    agentCommand: "agent-a",
+    cwd: "/tmp/no-deny-list",
+    acpx: { session_options: { allowed_tools: ["Read"] } },
+  });
+  const reloaded = parseSessionRecord(
+    JSON.parse(JSON.stringify(serializeSessionRecordForDisk(record))),
+  );
+  assert.deepEqual(reloaded?.acpx?.session_options, { allowed_tools: ["Read"] });
+});
+
+for (const malformed of ["Bash", ["Bash", 7], { Bash: true }]) {
+  test(`session records stay readable and ignore malformed deny list ${JSON.stringify(malformed)}`, () => {
+    const record = makeSessionRecord({
+      acpxRecordId: "malformed-deny-list",
+      acpSessionId: "malformed-deny-list",
+      agentCommand: "agent-a",
+      cwd: "/tmp/malformed-deny-list",
+    });
+    const parsed = parseSessionRecord({
+      ...serializeSessionRecordForDisk(record),
+      acpx: { session_options: { model: "sonnet", disallowed_tools: malformed } },
+    });
+    assert.ok(parsed);
+    assert.equal(parsed.acpxRecordId, "malformed-deny-list");
+    assert.deepEqual(parsed.acpx?.session_options, { model: "sonnet" });
+  });
+}
+
 test("listSessions preserves acpx session_options system_prompt string and append", async () => {
   await withTempHome(async (homeDir) => {
     const session = await loadSessionModule();

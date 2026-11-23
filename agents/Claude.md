@@ -46,6 +46,17 @@ For built-in Claude sessions, `--allowed-tools` and embedded
 exclusive tool list. They can pre-approve calls before ACPX's policies or
 permission mode are consulted.
 
+Embedded callers can set `sessionOptions.disallowedTools` when creating a
+Claude session. ACPX passes the string array to the Claude adapter in
+`_meta.claudeCode.options.disallowedTools` on `session/new`, `session/load`, and
+`session/resume`. The adapter uses it as the Claude Agent SDK's native deny
+list. ACPX saves the list as `session_options.disallowed_tools` and reads it
+from the record on reconnect. Reusing an existing persistent session keeps
+its saved creation options.
+
+A new session created without the option omits the field. An explicit empty
+array is saved and sent as an empty list.
+
 For checks that must cover every native tool call, the SDK recommends a trusted
 `PreToolUse` hook; a hook denial applies before automatic approvals. Configure
 that in the native Claude environment. ACPX's typed session options do not
