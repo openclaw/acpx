@@ -18,7 +18,7 @@ type Schema = {
   safeParse(value: unknown): { success: boolean };
 };
 const sdk = (await import(
-  new URL("./schema/zod.gen.js", import.meta.resolve("@agentclientprotocol/sdk")).href
+  new URL("../schema/zod.gen.js", import.meta.resolve("@agentclientprotocol/sdk")).href
 )) as {
   zResourceLink: Schema;
   zTextResourceContents: Schema;

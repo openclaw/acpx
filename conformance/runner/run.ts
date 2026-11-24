@@ -7,13 +7,14 @@ import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import {
-  ClientSideConnection,
+  client as createClient,
+  methods,
+  type ClientConnection,
   PROTOCOL_VERSION,
   type ReadTextFileRequest,
   type ReadTextFileResponse,
   RequestError,
   ndJsonStream,
-  type Client,
   type InitializeResponse,
   type SessionId,
   type SessionNotification,
@@ -86,7 +87,7 @@ type RunReport = {
 };
 
 type Harness = {
-  connection: ClientSideConnection;
+  connection: ClientConnection;
   client: RunnerClient;
   prompts: PromptObservations;
   initializeResult: InitializeResponse;
@@ -122,7 +123,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_UPDATE_TIMEOUT_MS = 30_000;
 const DEFAULT_INITIALIZE_TIMEOUT_MS = 10_000;
 
-class RunnerClient implements Client {
+class RunnerClient {
   readonly updates: SessionNotification[] = [];
   readonly filesystemOperations: FilesystemOperation[] = [];
   private readonly permissionMode: PermissionMode;
@@ -602,7 +603,14 @@ async function createHarness(options: CliOptions, signal: AbortSignal): Promise<
     defaultSessionCwd: options.cwd,
   });
   const prompts = new PromptObservations(client.updates);
-  const connection = new ClientSideConnection(() => client, prompts.observeStream(stream));
+  const connection = createClient()
+    .onRequest(methods.client.session.requestPermission, ({ params }) =>
+      client.requestPermission(params),
+    )
+    .onRequest(methods.client.fs.readTextFile, ({ params }) => client.readTextFile(params))
+    .onRequest(methods.client.fs.writeTextFile, ({ params }) => client.writeTextFile(params))
+    .onNotification(methods.client.session.update, ({ params }) => client.sessionUpdate(params))
+    .connect(prompts.observeStream(stream));
   let initializeResult: InitializeResponse;
   let shutdownPromise: Promise<void> | undefined;
   const waitForSpawn = new Promise<void>((resolve, reject) => {
@@ -647,7 +655,7 @@ async function createHarness(options: CliOptions, signal: AbortSignal): Promise<
     await lifetime.capture();
     signal.throwIfAborted();
     initializeResult = await withTimeout(
-      connection.initialize({
+      connection.agent.request(methods.agent.initialize, {
         protocolVersion: PROTOCOL_VERSION,
         clientCapabilities: {
           fs: {
@@ -843,7 +851,7 @@ async function executeCaseStep(params: {
         timeoutMs: requestTimeoutMs,
         expectError: step.expect_error,
         operation: async () => {
-          return await harness.connection.newSession({
+          return await harness.connection.agent.request(methods.agent.session.new, {
             cwd: cwdCandidate as string,
             mcpServers: [],
           });
@@ -876,10 +884,13 @@ async function executeCaseStep(params: {
       const sessionId = resolveMaybeSavedRef(step.session, context.saved);
       let observation: PromptObservation | undefined;
       const runPrompt = () => {
-        const dispatched = harness.prompts.dispatch(harness.connection, {
-          sessionId: sessionId as SessionId,
-          prompt: step.prompt,
-        });
+        const dispatched = harness.prompts.dispatch(
+          (params) => harness.connection.agent.request(methods.agent.session.prompt, params),
+          {
+            sessionId: sessionId as SessionId,
+            prompt: step.prompt,
+          },
+        );
         observation = dispatched.observation;
         return dispatched.pending;
       };
@@ -905,10 +916,13 @@ async function executeCaseStep(params: {
 
     case "prompt_background": {
       const sessionId = resolveMaybeSavedRef(step.session, context.saved);
-      const dispatched = harness.prompts.dispatch(harness.connection, {
-        sessionId: sessionId as SessionId,
-        prompt: step.prompt,
-      });
+      const dispatched = harness.prompts.dispatch(
+        (params) => harness.connection.agent.request(methods.agent.session.prompt, params),
+        {
+          sessionId: sessionId as SessionId,
+          prompt: step.prompt,
+        },
+      );
       context.background.set(step.save_as, dispatched);
       context.promptSources.set(step.save_as, dispatched.observation);
       return;
@@ -947,7 +961,9 @@ async function executeCaseStep(params: {
         timeoutMs: requestTimeoutMs,
         expectError: step.expect_error,
         operation: async () => {
-          return await harness.connection.cancel({ sessionId: sessionId as SessionId });
+          return await harness.connection.agent.notify(methods.agent.session.cancel, {
+            sessionId: sessionId as SessionId,
+          });
         },
       });
       return;

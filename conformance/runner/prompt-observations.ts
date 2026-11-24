@@ -1,5 +1,4 @@
 import type {
-  ClientSideConnection,
   PromptRequest,
   PromptResponse,
   SessionNotification,
@@ -45,7 +44,7 @@ export class PromptObservations {
   }
 
   dispatch(
-    connection: Pick<ClientSideConnection, "prompt">,
+    sendPrompt: (params: PromptRequest) => Promise<PromptResponse>,
     params: PromptRequest,
   ): ObservedPrompt {
     const observation: PromptObservation = { sessionId: params.sessionId, ambiguous: false };
@@ -56,7 +55,7 @@ export class PromptObservations {
     };
     let pending: Promise<PromptResponse>;
     try {
-      pending = connection.prompt(params);
+      pending = sendPrompt(params);
     } catch (error) {
       finish();
       throw error;

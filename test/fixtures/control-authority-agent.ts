@@ -3,11 +3,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { setTimeout } from "node:timers/promises";
 import {
-  AgentSideConnection,
+  agent,
+  methods,
   ndJsonStream,
   PROTOCOL_VERSION,
   RequestError,
-  type Agent,
   type SessionConfigOption,
 } from "@agentclientprotocol/sdk";
 
@@ -104,8 +104,8 @@ async function control(method: string, value: string, apply: () => void) {
   await fs.appendFile(path.join(directory, "effects.jsonl"), entry);
 }
 
-const agent: Agent = {
-  async initialize() {
+const app = agent()
+  .onRequest(methods.agent.initialize, async () => {
     return {
       protocolVersion: PROTOCOL_VERSION,
       agentCapabilities: {
@@ -114,9 +114,9 @@ const agent: Agent = {
       },
       authMethods: [],
     };
-  },
-  async authenticate() {},
-  async newSession() {
+  })
+  .onRequest(methods.agent.authenticate, async () => {})
+  .onRequest(methods.agent.session.new, async () => {
     await fs.appendFile(path.join(directory, "sessions.jsonl"), '"new"\n');
     if (existsSync(path.join(directory, "hold-new"))) {
       await fs.writeFile(path.join(directory, "new-started"), "started");
@@ -125,8 +125,8 @@ const agent: Agent = {
       }
     }
     return { sessionId: "authority-session", ...sessionState() };
-  },
-  async loadSession() {
+  })
+  .onRequest(methods.agent.session.load, async () => {
     await fs.appendFile(path.join(directory, "sessions.jsonl"), '"load"\n');
     if (existsSync(path.join(directory, "hold-load"))) {
       await fs.writeFile(path.join(directory, "load-started"), "started");
@@ -138,10 +138,10 @@ const agent: Agent = {
       throw RequestError.internalError(undefined, "Controlled cold load failure");
     }
     return sessionState();
-  },
-  async prompt({ sessionId, prompt }) {
+  })
+  .onRequest(methods.agent.session.prompt, async ({ params: { sessionId, prompt } }) => {
     if (prompt.some((part) => part.type === "text" && part.text === "refresh-models")) {
-      await connection.sessionUpdate({
+      await connection.client.notify(methods.client.session.update, {
         sessionId,
         update: { sessionUpdate: "config_option_update", configOptions: configOptions() },
       });
@@ -153,21 +153,21 @@ const agent: Agent = {
       await setTimeout(5);
     }
     if (existsSync(path.join(directory, "emit-final-state"))) {
-      await connection.sessionUpdate({
+      await connection.client.notify(methods.client.session.update, {
         sessionId,
         update: {
           sessionUpdate: "agent_message_chunk",
           content: { type: "text", text: "final answer while control waits" },
         },
       });
-      await connection.sessionUpdate({
+      await connection.client.notify(methods.client.session.update, {
         sessionId,
         update: {
           sessionUpdate: "available_commands_update",
           availableCommands: [{ name: "after-control", description: "Final command metadata" }],
         },
       });
-      await connection.sessionUpdate({
+      await connection.client.notify(methods.client.session.update, {
         sessionId,
         update: {
           sessionUpdate: "usage_update",
@@ -179,13 +179,13 @@ const agent: Agent = {
     }
     await fs.appendFile(path.join(directory, "prompt-effects.jsonl"), entry);
     return { stopReason: "end_turn" };
-  },
-  async cancel() {},
-  async closeSession() {
+  })
+  .onNotification(methods.agent.session.cancel, async () => {})
+  .onRequest(methods.agent.session.close, async () => {
     await fs.appendFile(path.join(directory, "sessions.jsonl"), '"close"\n');
     return {};
-  },
-  async setSessionMode({ modeId }) {
+  })
+  .onRequest(methods.agent.session.setMode, async ({ params: { modeId } }) => {
     await control("session/set_mode", modeId, () => {
       if (
         (modeId === "plan" && existsSync(path.join(directory, "retired-plan"))) ||
@@ -196,8 +196,8 @@ const agent: Agent = {
       mode = modeId;
     });
     return {};
-  },
-  async setSessionConfigOption({ configId, value }) {
+  })
+  .onRequest(methods.agent.session.setConfigOption, async ({ params: { configId, value } }) => {
     if (typeof value !== "string") {
       throw new Error("Expected string config value");
     }
@@ -212,18 +212,26 @@ const agent: Agent = {
       }
     });
     return { configOptions: configOptions() };
-  },
-  async extMethod(method, params) {
-    const modelId = params.modelId;
-    if (method !== "session/set_model" || typeof modelId !== "string") {
-      throw new Error("Unsupported control request");
-    }
-    await control("session/set_model", modelId, () => {
-      model = modelId;
-    });
-    return {};
-  },
-};
+  })
+  .onRequest(
+    "session/set_model",
+    (params: unknown) => {
+      const modelId =
+        params !== null && typeof params === "object" && "modelId" in params
+          ? params.modelId
+          : undefined;
+      if (typeof modelId !== "string") {
+        throw new Error("Unsupported control request");
+      }
+      return { modelId };
+    },
+    async ({ params: { modelId } }) => {
+      await control("session/set_model", modelId, () => {
+        model = modelId;
+      });
+      return {};
+    },
+  );
 
 const input = new ReadableStream<Uint8Array>({
   start(controller) {
@@ -248,5 +256,5 @@ const output = new WritableStream<Uint8Array>({
     });
   },
 });
-const connection = new AgentSideConnection(() => agent, ndJsonStream(output, input));
+const connection = app.connect(ndJsonStream(output, input));
 await connection.closed;

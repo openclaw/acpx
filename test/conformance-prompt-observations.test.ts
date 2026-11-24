@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type {
-  ClientSideConnection,
-  PromptRequest,
-  PromptResponse,
-  SessionNotification,
+import {
+  agent,
+  client,
+  methods,
+  PROTOCOL_VERSION,
+  type AnyMessage,
 } from "@agentclientprotocol/sdk";
+import type { PromptRequest, PromptResponse, SessionNotification } from "@agentclientprotocol/sdk";
 import { PromptObservations } from "../conformance/runner/prompt-observations.js";
 
 function deferred<T>() {
@@ -52,21 +54,19 @@ function harness(holdFirst?: Promise<void>) {
     }),
   });
   const writer = stream.writable.getWriter();
-  const connection: Pick<ClientSideConnection, "prompt"> = {
-    prompt(request) {
-      const completion = deferred<PromptResponse>();
-      completions.push(completion);
-      entries.push(deferred<void>());
-      writes.push(
-        writer.write({
-          jsonrpc: "2.0",
-          id: completions.length,
-          method: "session/prompt",
-          params: request,
-        }),
-      );
-      return completion.promise;
-    },
+  const sendPrompt = (request: PromptRequest): Promise<PromptResponse> => {
+    const completion = deferred<PromptResponse>();
+    completions.push(completion);
+    entries.push(deferred<void>());
+    writes.push(
+      writer.write({
+        jsonrpc: "2.0",
+        id: completions.length,
+        method: "session/prompt",
+        params: request,
+      }),
+    );
+    return completion.promise;
   };
   return {
     updates,
@@ -75,9 +75,9 @@ function harness(holdFirst?: Promise<void>) {
     entries,
     writes,
     writer,
-    connection,
+    sendPrompt,
     state: () => ({ received, closed, aborted }),
-    dispatch: (request = params()) => observations.dispatch(connection, request),
+    dispatch: (request = params()) => observations.dispatch(sendPrompt, request),
   };
 }
 
@@ -154,7 +154,7 @@ test("missing and unsettled observations cannot masquerade as empty completed sc
 test("rejection before any handoff remains unbound and preserves the error", async () => {
   const h = harness();
   const failure = new Error("connection already closed");
-  const observed = h.observations.dispatch({ prompt: () => Promise.reject(failure) }, params());
+  const observed = h.observations.dispatch(() => Promise.reject(failure), params());
   await assert.rejects(observed.pending, (error) => error === failure);
   assert.equal(h.state().received, 0);
   assert.throws(() => h.observations.count(observed.observation, "closed"), /no observed handoff/);
@@ -192,3 +192,37 @@ for (const variant of ["unknown", "duplicate", "after-settlement"] as const) {
     await h.writer.close();
   });
 }
+
+test("SDK app requests retain prompt identity and updates through response delivery", async () => {
+  const updates: SessionNotification[] = [];
+  const observations = new PromptObservations(updates);
+  const toAgent = new TransformStream<AnyMessage>();
+  const toClient = new TransformStream<AnyMessage>();
+  const agentConnection = agent()
+    .onRequest(methods.agent.initialize, () => ({ protocolVersion: PROTOCOL_VERSION }))
+    .onRequest(methods.agent.session.prompt, async ({ params, client }) => {
+      await client.notify(methods.client.session.update, notification(params.sessionId));
+      return response;
+    })
+    .connect({ readable: toAgent.readable, writable: toClient.writable });
+  const connection = client()
+    .onNotification(methods.client.session.update, ({ params }) => {
+      updates.push(params);
+    })
+    .connect(
+      observations.observeStream({ readable: toClient.readable, writable: toAgent.writable }),
+    );
+  try {
+    await connection.agent.request(methods.agent.initialize, { protocolVersion: PROTOCOL_VERSION });
+    const observed = observations.dispatch(
+      (request) => connection.agent.request(methods.agent.session.prompt, request),
+      params(),
+    );
+    assert.deepEqual(await observed.pending, response);
+    assert.equal(observations.count(observed.observation, "SDK prompt"), 1);
+  } finally {
+    connection.close();
+    agentConnection.close();
+    await Promise.all([connection.closed, agentConnection.closed]);
+  }
+});
