@@ -3094,10 +3094,22 @@ test("sessions prune supports json output and include-history", async () => {
 test("local session reads leave an empty home untouched", async () => {
   await withTempHome(async (homeDir) => {
     const sessionDir = path.join(homeDir, ".acpx", "sessions");
-    const commands = [["list", "--local"], ["show"], ["read"], ["history"]];
-    for (const command of commands) {
-      const result = await runCli(["--format", "json", "pi", "sessions", ...command], homeDir);
-      assert.equal(result.code, command[0] === "list" ? 0 : 1, result.stderr);
+    const exportPath = path.join(homeDir, "export.json");
+    const commands: Array<[string[], number]> = [
+      [["sessions", "list", "--local"], 0],
+      [["sessions", "show"], 1],
+      [["sessions", "read"], 1],
+      [["sessions", "history"], 1],
+      [["sessions", "export", "--output", exportPath], 2],
+      [["sessions", "prune", "--dry-run"], 0],
+      [["sessions", "prune"], 0],
+      [["status"], 0],
+      [["cancel"], 0],
+      [["set-mode", "plan"], 4],
+    ];
+    for (const [command, code] of commands) {
+      const result = await runCli(["--format", "json", "pi", ...command], homeDir);
+      assert.equal(result.code, code, result.stderr);
       assert.equal(await fileExists(sessionDir), false, command.join(" "));
     }
   });
