@@ -5210,6 +5210,68 @@ test("integration: prompt exits after done while detached owner stays warm", asy
   });
 });
 
+test("integration: prompt --expect-record rejects a replaced named record before submission", async () => {
+  await withTempHome(async (homeDir) => {
+    const harness = await configuredHarnessInvocation(homeDir, [
+      process.execPath,
+      MOCK_AGENT_PATH,
+      "--supports-load-session",
+    ]);
+    const requestLog = path.join(homeDir, "requests.jsonl");
+    const cli = (format: string, ...args: string[]) =>
+      runCli(["--cwd", homeDir, "--format", format, ...harness, ...args], homeDir, {
+        env: { ACPX_TEST_REQUEST_LOG: requestLog },
+      });
+    const create = async () => {
+      const result = await cli("json", "sessions", "new", "--name", "shared");
+      assert.equal(result.code, 0, result.stderr);
+      return JSON.parse(result.stdout) as { acpxRecordId: string; acpxSessionId: string };
+    };
+    const first = await create();
+    const current = await create();
+    assert.notEqual(first.acpxRecordId, current.acpxRecordId);
+    const before = await fs.readFile(requestLog, "utf8");
+    for (const id of [first.acpxRecordId, current.acpxSessionId, current.acpxRecordId.slice(-8)]) {
+      const stale = await cli(
+        "json",
+        "prompt",
+        "-s",
+        "shared",
+        "--expect-record",
+        id,
+        "--no-wait",
+        "stale",
+      );
+      assert.equal(stale.code, 4, stale.stderr);
+      assert.equal(JSON.parse(stale.stdout).error.data.detailCode, "SESSION_RECORD_MISMATCH");
+    }
+    assert.equal(await fs.readFile(requestLog, "utf8"), before);
+    await assert.rejects(fs.stat(queuePaths(homeDir, current.acpxRecordId).lockPath), {
+      code: "ENOENT",
+    });
+    const matched = await cli(
+      "quiet",
+      "prompt",
+      "-s",
+      "shared",
+      "--expect-record",
+      current.acpxRecordId,
+      "say exactly: matched",
+    );
+    assert.equal(matched.code, 0, matched.stderr);
+    assert.match(matched.stdout, /matched/);
+    const prompts = (await fs.readFile(requestLog, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { method?: string; params?: { sessionId?: string } })
+      .filter((entry) => entry.method === "session/prompt");
+    assert.deepEqual(
+      prompts.map((entry) => entry.params?.sessionId),
+      [current.acpxSessionId],
+    );
+  });
+});
+
 test("integration: prompt --no-wait is processed by the detached queue owner", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

@@ -469,6 +469,8 @@ Resume behavior:
 
 Queueing is per persistent session.
 
+When retaining a named session across commands, save its full `acpxRecordId` from JSON creation output and use `prompt -s <name> --expect-record <id>` on subsequent sends. If the name now selects another record, reselect the session before retrying.
+
 - The active `acpx` process for a running prompt becomes the queue owner.
 - Other invocations submit prompts over local IPC.
 - On Unix-like systems, queue IPC uses `/tmp/acpx-<home-hash>/<session-hash>.sock`.
