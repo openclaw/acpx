@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Changes
+
+- CLI: add `prompt --expect-record <id>` so callers can reject a replaced named session before sending or queueing a prompt. Thanks @vincentkoc.
+
 ### Fixes
 
 - Sessions: keep tool result text that agents report through ACP `content` blocks when they send no `rawOutput`, so saved sessions and the embedded runtime no longer record those results as empty. Thanks @saariuslystoned.

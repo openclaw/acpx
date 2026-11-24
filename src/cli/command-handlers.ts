@@ -251,6 +251,17 @@ export async function handlePrompt(
     agent.cwd,
     resolveSessionNameFromFlags(flags, command),
   );
+  if (promptFlags.expectRecord !== undefined && record.acpxRecordId !== promptFlags.expectRecord) {
+    throw new AcpxOperationalError(
+      "The selected session has a different acpxRecordId. Select the session again before prompting.",
+      {
+        outputCode: "NO_SESSION",
+        detailCode: "SESSION_RECORD_MISMATCH",
+        origin: "cli",
+        retryable: false,
+      },
+    );
+  }
   const outputFormatter = createOutputFormatter(outputPolicy.format, {
     jsonContext: {
       sessionId: record.acpxRecordId,

@@ -60,6 +60,7 @@ Prompt options:
 ```bash
 -s, --session <name>   Use named session instead of cwd default
 --no-wait              Queue prompt and return immediately if session is busy
+--expect-record <id>   Require the exact local acpxRecordId (explicit prompt only)
 -f, --file <path>      Read prompt text from file (`-` means stdin)
 ```
 
@@ -69,6 +70,7 @@ Notes:
 - Top-level `flow run <file>` executes a user-authored workflow module and persists run state under `~/.acpx/flows/runs/`.
 - If a prompt argument is omitted, `acpx` reads prompt text from stdin when piped.
 - `--file` works for implicit prompt, `prompt`, and `exec` commands.
+- Use `acpx <agent> prompt -s <name> --expect-record <id> "…"` when another client can replace the named session. Copy the full `acpxRecordId` from `sessions new` or `sessions ensure` JSON output. If routing selects a different record, the CLI exits 4 before queueing the prompt, including with `--no-wait`. The check applies to the local record. The agent's reconnect policy still governs its ACP session.
 - A `--file` path that does not exist or is a directory fails with `Prompt file not found: <path>` or `Prompt file is not a file: <path>` (exit 1) before any agent starts. An empty `--file` value (for example an unset shell variable) fails with `Prompt file must not be empty` (exit 2) instead of falling back to stdin.
 - After an agent name, `--file` may appear before or after `prompt`/`exec`; an explicit value on the subcommand wins. `--no-wait` works before or after `prompt`, and omission still waits normally.
 - `acpx` with no args in an interactive terminal shows help.

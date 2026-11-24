@@ -57,6 +57,7 @@ export type GlobalFlags = PermissionFlags & {
 
 export type PromptFlags = {
   session?: string;
+  expectRecord?: string;
   wait?: boolean;
   file?: string;
 };
