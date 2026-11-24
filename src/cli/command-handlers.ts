@@ -188,6 +188,7 @@ async function findScopedSessionOrThrow(
     cwd: agent.cwd,
     name: sessionName,
     includeClosed: true,
+    readOnly: true,
   });
 
   if (!record) {

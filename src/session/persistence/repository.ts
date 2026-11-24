@@ -225,7 +225,7 @@ export async function listSessionsForAgent(agentCommand: string): Promise<Sessio
 async function collectSessionRecords(agentCommand?: string): Promise<SessionRecord[]> {
   const scope = agentCommand === undefined ? undefined : agentScope(agentCommand);
   const records: SessionRecord[] = [];
-  for await (const record of sessionRecords()) {
+  for await (const record of sessionRecords(true)) {
     if (scope === undefined || scope.has(record.agentCommand)) {
       records.push(record);
     }

@@ -49,6 +49,7 @@ Repo: https://github.com/openclaw/acpx
 - CLI/terminals/flows: a working directory that is a regular file (`--cwd`, `terminal/create`, shell actions) now reports `Working directory is unavailable: <path>` instead of `ENOTDIR` on the project `.acpxrc.json` or a bare `spawn ENOTDIR`. Thanks @KrasimirKralev.
 - CLI: show hidden child directories with an explicit relative path in reused-session banners. Thanks @Dcastroro.
 - Dependencies: update the guarded filesystem runtime and development tools while retaining ACP SDK 1.x and the existing security overrides.
+- Sessions: keep local listing and history reads from creating a session directory in an empty home.
 
 ## 0.22.0 - 2026-11-06
 

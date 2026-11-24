@@ -3091,6 +3091,18 @@ test("sessions prune supports json output and include-history", async () => {
   });
 });
 
+test("local session reads leave an empty home untouched", async () => {
+  await withTempHome(async (homeDir) => {
+    const sessionDir = path.join(homeDir, ".acpx", "sessions");
+    const commands = [["list", "--local"], ["show"], ["read"], ["history"]];
+    for (const command of commands) {
+      const result = await runCli(["--format", "json", "pi", "sessions", ...command], homeDir);
+      assert.equal(result.code, command[0] === "list" ? 0 : 1, result.stderr);
+      assert.equal(await fileExists(sessionDir), false, command.join(" "));
+    }
+  });
+});
+
 test("sessions read prints full history by default and supports --tail", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = path.join(homeDir, "workspace");
