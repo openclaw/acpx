@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  ReactFlowProvider,
-  useReactFlowStoreApi,
-  type Node,
-  type NodeChange,
-} from "@xyflow/react";
+import { ReactFlowProvider, useReactFlowStoreApi, type Node, type NodeChange } from "@xyflow/react";
 import { createElement, useEffect } from "react";
 import { act, create } from "react-test-renderer";
 import { useNodeMeasurements } from "../examples/flows/replay-viewer/src/hooks/use-node-measurements.js";
