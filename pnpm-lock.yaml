@@ -75,13 +75,13 @@ importers:
         version: 0.12.1
       fast-json-patch:
         specifier: ^3.1.1
-        version: 3.1.1
+        version: 3.1.2
       husky:
         specifier: ^9.1.7
         version: 9.1.7
       lint-staged:
         specifier: ^17.6.0
-        version: 17.6.1
+        version: 17.6.2
       markdownlint-cli2:
         specifier: ^0.24.1
         version: 0.24.2(supports-color@7.2.0)
@@ -1883,8 +1883,8 @@ packages:
     resolution: {integrity: sha512-7MptL8U0cqcFdzIzwOTHoilX9x5BrNqye7Z/LuC7kCMRio1EMSyqRK3BEAUD7sXRq4iT4AzTVuZdhgQ2TCvYLg==}
     engines: {node: '>=8.6.0'}
 
-  fast-json-patch@3.1.1:
-    resolution: {integrity: sha512-vf6IHUX2SBcA+5/+4883dsIjpBTqmfBjmYiWK1savxQmFk4JfBMLa7ynTYOs1Rolp/T1betJxHiGD3g1Mn8lUQ==}
+  fast-json-patch@3.1.2:
+    resolution: {integrity: sha512-Dhr5mVii8hIvjkp0Xdrun9B3GlXe3j+L4Ymv8J0h3Di996xoBi8qSDQ/sqSNKZd1NEqx55ZfcseG1MphW7MkHg==}
 
   fast-string-truncated-width@3.0.3:
     resolution: {integrity: sha512-0jjjIEL6+0jag3l2XWWizO64/aZVtpiGE3t0Zgqxv0DPuxiMjvB3M24fCyhZUO4KomJQPj3LTSUnDP3GpdwC0g==}
@@ -2208,8 +2208,8 @@ packages:
   linkify-it@6.1.0:
     resolution: {integrity: sha512-wJ/TwpSDTLepCrQoYWYIExIKg5Zchex2Nn5yk2mFnB+6PtdkHtyLx742md9csRjjOnGkKIS/RrbY7l8D6gT9Vw==}
 
-  lint-staged@17.6.1:
-    resolution: {integrity: sha512-3MXgVN7BERDR/6CXZs2fDHGc+r0+hlvGAa9wqMlVbIS6RVRuaPOnb5SnN6wMXulwfEy9DXVkMVUN/8cUlpPDnw==}
+  lint-staged@17.6.2:
+    resolution: {integrity: sha512-c/JaXaXmleubmKUwwp4OAcq55RV9Z3HTUNdqdqPh2srtmP9Of3bcR6o00GoWDUye+9JhMuoYkhYqAVPIOZKcsw==}
     engines: {node: '>=22.22.1'}
     hasBin: true
 
@@ -4324,7 +4324,7 @@ snapshots:
       merge2: 1.4.1
       micromatch: 4.0.8
 
-  fast-json-patch@3.1.1: {}
+  fast-json-patch@3.1.2: {}
 
   fast-string-truncated-width@3.0.3: {}
 
@@ -4592,7 +4592,7 @@ snapshots:
     dependencies:
       uc.micro: 3.0.0
 
-  lint-staged@17.6.1:
+  lint-staged@17.6.2:
     dependencies:
       picomatch: 4.0.7
       string-argv: 0.4.0
