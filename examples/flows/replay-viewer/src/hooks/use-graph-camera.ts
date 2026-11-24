@@ -10,7 +10,8 @@ type UseGraphCameraOptions = {
 };
 
 export const REPLAY_FIT_VIEW_OPTIONS = {
-  padding: 0.56,
+  // Preserve the former 0.56 ratio now that numeric padding means pixels.
+  padding: "17.948717948717952%",
   minZoom: 0.08,
   maxZoom: 0.92,
   duration: 360,

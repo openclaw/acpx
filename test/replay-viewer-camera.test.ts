@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { InternalNode, Node, ReactFlowInstance } from "@xyflow/react";
+import {
+  getViewportForBounds,
+  type InternalNode,
+  type Node,
+  type ReactFlowInstance,
+} from "@xyflow/react";
 import { createElement } from "react";
 import { act, create } from "react-test-renderer";
 import {
@@ -166,6 +171,25 @@ test("overview fits replacement viewports and returning to follow centers once",
   });
 });
 
+test("overview framing retains its viewport margins", () => {
+  for (const { width, height, expected } of [
+    { width: 1000, height: 800, expected: { x: 179, y: 239.5, zoom: 0.321 } },
+    { width: 1560, height: 800, expected: { x: 280, y: 150, zoom: 0.5 } },
+  ]) {
+    assert.deepEqual(
+      getViewportForBounds(
+        { x: 0, y: 0, width: 2000, height: 1000 },
+        width,
+        height,
+        REPLAY_FIT_VIEW_OPTIONS.minZoom,
+        REPLAY_FIT_VIEW_OPTIONS.maxZoom,
+        REPLAY_FIT_VIEW_OPTIONS.padding,
+      ),
+      expected,
+    );
+  }
+});
+
 test("ineligible camera inputs and an uninitialized viewport retain their guards", async () => {
   const calls: CameraCall[] = [];
   await withCamera({ ...options, runId: undefined }, async (h) => {
@@ -194,7 +218,7 @@ test("current measured dimensions keep priority over declared sizes and defaults
   const measured: InternalNode = {
     ...userNode,
     measured: { width: 320, height: 180 },
-    internals: { positionAbsolute: position, z: 0, userNode },
+    internals: { positionAbsolute: position, z: 0, userNode, isParent: false },
   };
   await withCamera(options, async (h) => {
     await h.install(makeInstance("measured", calls, true, measured));
