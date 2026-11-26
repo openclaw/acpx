@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Fixes
+
+- CLI/prompts: keep image and audio blocks larger than a few megabytes as media blocks in structured `--file` and stdin prompts instead of sending the whole JSON to the agent as one text block, and report invalid base64 in such blocks as an error. Thanks @Batuhan4.
+
 ## 0.23.0 - 2026-11-26
 
 **Highlights:** Guard prompts against replaced sessions, improve cancellation and session recovery, preserve tool results and process failures, and clarify CLI and flow diagnostics.
