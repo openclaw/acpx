@@ -8,6 +8,7 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+- Dependencies: update fs-safe to 0.28.2 for Windows native loading and long temporary-file paths.
 - CLI/prompts: keep image and audio blocks larger than a few megabytes as media blocks in structured `--file` and stdin prompts instead of sending the whole JSON to the agent as one text block, and report invalid base64 in such blocks as an error. Thanks @Batuhan4.
 
 ## 0.23.0 - 2026-11-26
