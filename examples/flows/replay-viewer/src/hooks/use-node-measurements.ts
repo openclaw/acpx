@@ -6,8 +6,8 @@ export function useNodeMeasurements<NodeType extends Node>(nodes: NodeType[]) {
   const onNodesChange = useCallback<OnNodesChange<NodeType>>((changes) => {
     setMeasurements((current) => {
       let next = current;
-      for (const change of changes) {
-        if (change.type !== "dimensions" || !change.dimensions) {
+      for (const change of changes.getByType("dimensions")) {
+        if (!change.dimensions) {
           continue;
         }
         const measured = next.get(change.id);

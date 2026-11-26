@@ -59,6 +59,8 @@ Repo: https://github.com/openclaw/acpx
 - Dependencies: update the guarded filesystem runtime and development tools while retaining ACP SDK 1.x and the existing security overrides.
 - Sessions: keep local listing and history reads from creating a session directory in an empty home.
 
+- Replay viewer: retain node measurements and overview framing with React Flow 13.
+
 ## 0.22.0 - 2026-11-06
 
 **Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.

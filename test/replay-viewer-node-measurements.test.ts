@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ReactFlowProvider, useStoreApi, type Node, type NodeChange } from "@xyflow/react";
+import { ReactFlowProvider, useReactFlowStoreApi, type Node, type NodeChange } from "@xyflow/react";
 import { createElement, useEffect } from "react";
 import { act, create } from "react-test-renderer";
 import { useNodeMeasurements } from "../examples/flows/replay-viewer/src/hooks/use-node-measurements.js";
 
 type TestNode = Node<{ progress: number }>;
 type MeasuredNodes = ReturnType<typeof useNodeMeasurements<TestNode>>;
-type FlowStore = ReturnType<typeof useStoreApi<TestNode>>;
+type FlowStore = ReturnType<typeof useReactFlowStoreApi<TestNode>>;
 type Harness = {
   current: () => MeasuredNodes;
   store: () => FlowStore;
@@ -19,7 +19,7 @@ test("graph dimensions survive fresh controlled playback nodes without freezing 
   const original = makeNodes(0);
   const before = structuredClone(original);
   await withMeasuredNodes(original, async (harness) => {
-    assert.equal(harness.store().getState().nodesInitialized, false);
+    assert.equal(harness.store().nodesStore.getState().nodesInitialized, false);
     await harness.change([
       { type: "dimensions", id: "first", dimensions: { width: 264, height: 164 } },
       { type: "dimensions", id: "last", dimensions: { width: 264, height: 138 } },
@@ -28,7 +28,7 @@ test("graph dimensions survive fresh controlled playback nodes without freezing 
     for (let frame = 1; frame <= 12; frame += 1) {
       const next = makeNodes(frame / 12);
       await harness.update(next);
-      const state = harness.store().getState();
+      const state = harness.store().nodesStore.getState();
       assert.equal(state.nodesInitialized, true);
       assert.deepEqual(state.nodeLookup.get("first")?.measured, { width: 264, height: 164 });
       assert.deepEqual(state.nodeLookup.get("last")?.measured, { width: 264, height: 138 });
@@ -57,7 +57,7 @@ test("later dimension callbacks replace earlier measurements", async () => {
       { type: "dimensions", id: "first", dimensions: { width: 264, height: 192 } },
     ]);
     await harness.update(makeNodes(0.5));
-    assert.deepEqual(harness.store().getState().nodeLookup.get("first")?.measured, {
+    assert.deepEqual(harness.store().nodesStore.getState().nodeLookup.get("first")?.measured, {
       width: 264,
       height: 192,
     });
@@ -75,7 +75,7 @@ test("measurement ownership leaves projected selection, position and membership 
       { type: "dimensions", id: "first" },
     ]);
     assert.deepEqual(harness.current().nodes, nodes);
-    assert.equal(harness.store().getState().nodesInitialized, false);
+    assert.equal(harness.store().nodesStore.getState().nodesInitialized, false);
   });
 });
 
@@ -88,12 +88,12 @@ test("a new keyed run measures reused node ids independently", async () => {
     await harness.update(makeNodes(0), "second-run");
     assert.equal(harness.current().nodes[0]?.measured, undefined);
     assert.equal(harness.current().nodes[1]?.measured, undefined);
-    assert.equal(harness.store().getState().nodesInitialized, false);
+    assert.equal(harness.store().nodesStore.getState().nodesInitialized, false);
     await harness.change([
       { type: "dimensions", id: "first", dimensions: { width: 290, height: 190 } },
       { type: "dimensions", id: "last", dimensions: { width: 290, height: 140 } },
     ]);
-    assert.equal(harness.store().getState().nodesInitialized, true);
+    assert.equal(harness.store().nodesStore.getState().nodesInitialized, true);
     assert.deepEqual(harness.current().nodes[0]?.measured, { width: 290, height: 190 });
   });
 });
@@ -108,14 +108,14 @@ test("a replacement node starts unmeasured while retained nodes keep their dimen
     assert.ok(next[0]);
     next[0].id = "replacement";
     await harness.update(next);
-    assert.equal(harness.store().getState().nodeLookup.has("first"), false);
+    assert.equal(harness.store().nodesStore.getState().nodeLookup.has("first"), false);
     assert.equal(harness.current().nodes[0]?.measured, undefined);
     assert.deepEqual(harness.current().nodes[1]?.measured, { width: 264, height: 138 });
-    assert.equal(harness.store().getState().nodesInitialized, false);
+    assert.equal(harness.store().nodesStore.getState().nodesInitialized, false);
     await harness.change([
       { type: "dimensions", id: "replacement", dimensions: { width: 264, height: 208 } },
     ]);
-    assert.equal(harness.store().getState().nodesInitialized, true);
+    assert.equal(harness.store().nodesStore.getState().nodesInitialized, true);
     assert.deepEqual(harness.current().nodes[0]?.measured, { width: 264, height: 208 });
   });
 });
@@ -133,13 +133,13 @@ async function withMeasuredNodes(
   let currentRunId = "first-run";
   function Component({ nodes }: { nodes: TestNode[] }) {
     current = useNodeMeasurements(nodes);
-    store = useStoreApi<TestNode>();
+    store = useReactFlowStoreApi<TestNode>();
     const measured = current;
     const flowStore = store;
     useEffect(() => {
       // Exercise the installed React Flow controlled store's adoption and callback path.
-      flowStore.setState({ onNodesChange: measured.onNodesChange });
-      flowStore.getState().setNodes(measured.nodes);
+      flowStore.optionsStore.setState({ onNodesChange: measured.onNodesChange });
+      flowStore.optionsStore.getState().setNodes(measured.nodes);
     }, [flowStore, measured.nodes, measured.onNodesChange]);
     return createElement("div");
   }
@@ -165,7 +165,7 @@ async function withMeasuredNodes(
       current: read,
       store: readStore,
       async change(changes) {
-        await act(async () => readStore().getState().triggerNodeChanges(changes));
+        await act(async () => readStore().optionsStore.getState().emitNodeChanges(changes));
       },
       async update(nodes, runId = currentRunId) {
         currentRunId = runId;
