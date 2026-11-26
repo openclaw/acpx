@@ -4,7 +4,7 @@ import type { SessionNotification, ToolKind } from "@agentclientprotocol/sdk";
 import { runtimeEventFromMessage } from "../src/runtime/public/events.js";
 
 const sdk = (await import(
-  new URL("./schema/zod.gen.js", import.meta.resolve("@agentclientprotocol/sdk")).href
+  new URL("../schema/zod.gen.js", import.meta.resolve("@agentclientprotocol/sdk")).href
 )) as { zSessionNotification: { parse(value: unknown): SessionNotification } };
 
 // Record<ToolKind, true> makes an SDK enum addition require an explicit test case.

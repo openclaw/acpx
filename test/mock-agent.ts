@@ -5,15 +5,14 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import {
-  AgentSideConnection,
+  agent,
   type AnyMessage,
   type CloseSessionRequest,
   type CloseSessionResponse,
   PROTOCOL_VERSION,
   RequestError,
   ndJsonStream,
-  type Agent,
-  type AgentSideConnection as AgentConnection,
+  type AgentContext,
   type ContentBlock,
   type CreateElicitationRequest,
   type CreateElicitationResponse,
@@ -823,14 +822,14 @@ function buildConfigOptions(
   ];
 }
 
-class MockAgent implements Agent {
-  private readonly connection: AgentConnection;
+class MockAgent {
+  private readonly connection: AgentContext;
   private readonly sessions = new Map<SessionId, SessionState>();
   private readonly options: MockAgentOptions;
   private readonly queueCancellationPhases = new Set<"entry" | "before-result">();
   private clientCapabilities?: InitializeRequest["clientCapabilities"];
 
-  constructor(connection: AgentConnection, options: MockAgentOptions) {
+  constructor(connection: AgentContext, options: MockAgentOptions) {
     this.connection = connection;
     this.options = options;
   }
@@ -1229,15 +1228,16 @@ class MockAgent implements Agent {
     };
   }
 
-  async extMethod(
-    method: string,
-    params: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
+  async extMethod(method: string, params: unknown): Promise<Record<string, unknown>> {
     if (method !== "session/set_model") {
       throw RequestError.methodNotFound(method);
     }
-    const sessionId = typeof params.sessionId === "string" ? params.sessionId : "";
-    const modelId = typeof params.modelId === "string" ? params.modelId : "";
+    if (!params || typeof params !== "object") {
+      throw RequestError.invalidParams({ method, params });
+    }
+    const sessionId =
+      "sessionId" in params && typeof params.sessionId === "string" ? params.sessionId : "";
+    const modelId = "modelId" in params && typeof params.modelId === "string" ? params.modelId : "";
     if (!sessionId || !modelId) {
       throw RequestError.invalidParams({ method, params });
     }
@@ -1251,15 +1251,8 @@ class MockAgent implements Agent {
     return {};
   }
 
-  async unstable_setSessionModel(params: {
-    sessionId: string;
-    modelId: string;
-  }): Promise<Record<string, unknown>> {
-    return this.extMethod("session/set_model", params);
-  }
-
   private async sendAssistantMessage(sessionId: SessionId, text: string): Promise<void> {
-    await this.connection.sessionUpdate({
+    await this.connection.notify(methods.client.session.update, {
       sessionId,
       update: {
         sessionUpdate: "agent_message_chunk",
@@ -1272,7 +1265,7 @@ class MockAgent implements Agent {
   }
 
   private async sendAvailableCommands(sessionId: SessionId): Promise<void> {
-    await this.connection.sessionUpdate({
+    await this.connection.notify(methods.client.session.update, {
       sessionId,
       update: {
         sessionUpdate: "available_commands_update",
@@ -1292,7 +1285,7 @@ class MockAgent implements Agent {
 
     setTimeout(() => {
       void (async () => {
-        await this.connection.sessionUpdate({
+        await this.connection.notify(methods.client.session.update, {
           sessionId,
           update: {
             sessionUpdate: "tool_call",
@@ -1310,7 +1303,7 @@ class MockAgent implements Agent {
           setTimeout(resolve, 5);
         });
 
-        await this.connection.sessionUpdate({
+        await this.connection.notify(methods.client.session.update, {
           sessionId,
           update: {
             sessionUpdate: "tool_call_update",
@@ -1395,7 +1388,7 @@ class MockAgent implements Agent {
         throw new Error("Usage: extension-notification <method> <message>");
       }
 
-      await this.connection.extNotification(method, { message });
+      await this.connection.notify(method, { message });
       return `extension notification accepted: ${method}`;
     }
 
@@ -1409,7 +1402,7 @@ class MockAgent implements Agent {
 
       const method = rest.slice(0, firstSpace).trim();
       const message = rest.slice(firstSpace + 1).trim();
-      const response = await this.connection.extMethod(method, { message });
+      const response = await this.connection.request<Record<string, unknown>>(method, { message });
       return `extension request accepted: ${method} ${JSON.stringify(response)}`;
     }
 
@@ -1440,7 +1433,7 @@ class MockAgent implements Agent {
         throw new Error("Usage: read <path>");
       }
 
-      const readResult = await this.connection.readTextFile({
+      const readResult = await this.connection.request(methods.client.fs.readTextFile, {
         sessionId,
         path: filePath,
       });
@@ -1454,7 +1447,7 @@ class MockAgent implements Agent {
       }
 
       const toolCallId = randomUUID();
-      await this.connection.sessionUpdate({
+      await this.connection.notify(methods.client.session.update, {
         sessionId,
         update: {
           sessionUpdate: "tool_call",
@@ -1468,12 +1461,12 @@ class MockAgent implements Agent {
         },
       });
 
-      const readResult = await this.connection.readTextFile({
+      const readResult = await this.connection.request(methods.client.fs.readTextFile, {
         sessionId,
         path: filePath,
       });
 
-      await this.connection.sessionUpdate({
+      await this.connection.notify(methods.client.session.update, {
         sessionId,
         update: {
           sessionUpdate: "tool_call_update",
@@ -1516,7 +1509,7 @@ class MockAgent implements Agent {
       const filePath = rest.slice(0, firstSpace).trim();
       const content = rest.slice(firstSpace + 1);
 
-      await this.connection.writeTextFile({
+      await this.connection.request(methods.client.fs.writeTextFile, {
         sessionId,
         path: filePath,
         content,
@@ -1538,7 +1531,7 @@ class MockAgent implements Agent {
       const rawKind = rest.slice(0, firstSpace).trim();
       const title = rest.slice(firstSpace + 1).trim();
       const toolCallId = randomUUID();
-      const response = await this.connection.requestPermission({
+      const response = await this.connection.request(methods.client.session.requestPermission, {
         sessionId,
         toolCall: {
           toolCallId,
@@ -1670,7 +1663,7 @@ class MockAgent implements Agent {
     signal: AbortSignal,
   ): Promise<string> {
     if (command === "complete") {
-      await this.connection.completeElicitation({
+      await this.connection.notify(methods.client.elicitation.complete, {
         elicitationId: "elicitation-123",
       });
       return "elicitation complete accepted";
@@ -1896,8 +1889,23 @@ if (disconnectGateDirectory) {
   }, 30_000);
 }
 
-const connection = new AgentSideConnection(
-  (agentConnection) => new MockAgent(agentConnection, mockAgentOptions),
-  stream,
-);
-void connection;
+let mockAgent: MockAgent;
+const app = agent()
+  .onConnect((connection) => {
+    mockAgent = new MockAgent(connection.client, mockAgentOptions);
+  })
+  .onRequest(methods.agent.initialize, ({ params }) => mockAgent.initialize(params))
+  .onRequest(methods.agent.authenticate, () => mockAgent.authenticate())
+  .onRequest(methods.agent.session.new, ({ params }) => mockAgent.newSession(params))
+  .onRequest(methods.agent.session.load, ({ params }) => mockAgent.loadSession(params))
+  .onRequest(methods.agent.session.resume, ({ params }) => mockAgent.resumeSession(params))
+  .onRequest(methods.agent.session.close, ({ params }) => mockAgent.closeSession(params))
+  .onRequest(methods.agent.session.list, ({ params }) => mockAgent.listSessions(params))
+  .onRequest(methods.agent.session.prompt, ({ params }) => mockAgent.prompt(params))
+  .onRequest(methods.agent.session.setMode, ({ params }) => mockAgent.setSessionMode(params))
+  .onRequest(methods.agent.session.setConfigOption, ({ params }) =>
+    mockAgent.setSessionConfigOption(params),
+  )
+  .onNotification(methods.agent.session.cancel, ({ params }) => mockAgent.cancel(params))
+  .onRequest("*", ({ method, params }) => mockAgent.extMethod(method, params));
+app.connect(stream);

@@ -59,6 +59,8 @@ Repo: https://github.com/openclaw/acpx
 - Dependencies: update the guarded filesystem runtime and development tools while retaining ACP SDK 1.x and the existing security overrides.
 - Sessions: keep local listing and history reads from creating a session directory in an empty home.
 
+- ACP: retain protocol v1 behavior with SDK 2, including conformance checks, session controls, and client tool requests.
+
 ## 0.22.0 - 2026-11-06
 
 **Highlights:** Patch security advisories in glob, minimatch, qs, and re2js; add Goose, DeepSeek Harness, and experimental Ante support; expose ACP message observation, configure models per flow node, and improve session reliability and shell diagnostics.

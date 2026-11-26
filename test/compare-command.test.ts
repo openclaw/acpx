@@ -79,7 +79,8 @@ import { Readable, Writable } from "node:stream";
 
 const require = createRequire(process.env.ACPX_TEST_REPO_ROOT + "/package.json");
 const {
-  AgentSideConnection,
+  agent,
+  methods,
   PROTOCOL_VERSION,
   RequestError,
   ndJsonStream,
@@ -128,7 +129,7 @@ class CompareAgent {
   async prompt(params) {
     const text = promptText(params.prompt);
     if (mode === "cwd") {
-      const permission = await this.connection.requestPermission({
+      const permission = await this.connection.request(methods.client.session.requestPermission, {
         sessionId: params.sessionId,
         toolCall: {toolCallId: "cwd-check", title: "Execute", kind: "execute"},
         options: [{optionId: "allow", name: "Allow", kind: "allow_once"}, {optionId: "reject", name: "Reject", kind: "reject_once"}],
@@ -154,7 +155,7 @@ class CompareAgent {
       if (status === "isolated") {
         await fs.rm("compare-agent-lock", { recursive: true, force: true });
       }
-      await this.connection.sessionUpdate({
+      await this.connection.notify(methods.client.session.update, {
         sessionId: params.sessionId,
         update: {
           sessionUpdate: "agent_message_chunk",
@@ -166,7 +167,7 @@ class CompareAgent {
 
     if (mode === "filesystem-permission-error") {
       try {
-        await this.connection.readTextFile({
+        await this.connection.request(methods.client.fs.readTextFile, {
           sessionId: params.sessionId,
           path: path.join(process.cwd(), "permission-input.txt"),
         });
@@ -186,7 +187,7 @@ class CompareAgent {
     if (mode === "permission" || mode === "permission-mixed" || mode === "permission-error") {
       const outcomes = [];
       if (mode === "permission-mixed") {
-        const readResponse = await this.connection.requestPermission({
+        const readResponse = await this.connection.request(methods.client.session.requestPermission, {
           sessionId: params.sessionId,
           toolCall: {
             toolCallId: randomUUID(),
@@ -200,7 +201,7 @@ class CompareAgent {
         });
         outcomes.push(readResponse.outcome.optionId);
       }
-      const response = await this.connection.requestPermission({
+      const response = await this.connection.request(methods.client.session.requestPermission, {
         sessionId: params.sessionId,
         toolCall: {
           toolCallId: randomUUID(),
@@ -219,7 +220,7 @@ class CompareAgent {
           "SYNTHETIC_COMPARE_PERMISSION_RUNTIME_FAILURE",
         );
       }
-      await this.connection.sessionUpdate({
+      await this.connection.notify(methods.client.session.update, {
         sessionId: params.sessionId,
         update: {
           sessionUpdate: "agent_message_chunk",
@@ -235,7 +236,7 @@ class CompareAgent {
         : mode === "usage-partial"
           ? { input_tokens: 10, output_tokens: 20 }
           : undefined;
-      await this.connection.sessionUpdate({
+      await this.connection.notify(methods.client.session.update, {
         sessionId: params.sessionId,
         update: {
           sessionUpdate: "usage_update",
@@ -249,7 +250,7 @@ class CompareAgent {
 
     const delay = mode === "slow" ? 1200 : 10;
     await sleep(delay);
-    await this.connection.sessionUpdate({
+    await this.connection.notify(methods.client.session.update, {
       sessionId: params.sessionId,
       update: {
         sessionUpdate: "usage_update",
@@ -264,7 +265,7 @@ class CompareAgent {
         },
       },
     });
-    await this.connection.sessionUpdate({
+    await this.connection.notify(methods.client.session.update, {
       sessionId: params.sessionId,
       update: {
         sessionUpdate: "agent_message_chunk",
@@ -285,7 +286,15 @@ class CompareAgent {
 const output = Writable.toWeb(process.stdout);
 const input = Readable.toWeb(process.stdin);
 const stream = ndJsonStream(output, input);
-new AgentSideConnection((connection) => new CompareAgent(connection), stream);
+let compareAgent;
+agent()
+  .onConnect((connection) => { compareAgent = new CompareAgent(connection.client); })
+  .onRequest(methods.agent.initialize, () => compareAgent.initialize())
+  .onRequest(methods.agent.authenticate, () => compareAgent.authenticate())
+  .onRequest(methods.agent.session.new, ({ params }) => compareAgent.newSession(params))
+  .onRequest(methods.agent.session.prompt, ({ params }) => compareAgent.prompt(params))
+  .onNotification(methods.agent.session.cancel, () => compareAgent.cancel())
+  .connect(stream);
 `,
     "utf8",
   );

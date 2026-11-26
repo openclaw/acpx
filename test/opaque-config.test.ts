@@ -16,7 +16,7 @@ import type { SessionAcpxState } from "../src/types.js";
 import { makeSessionRecord } from "./runtime-test-helpers.js";
 
 const sdk = (await import(
-  new URL("./schema/zod.gen.js", import.meta.resolve("@agentclientprotocol/sdk")).href
+  new URL("../schema/zod.gen.js", import.meta.resolve("@agentclientprotocol/sdk")).href
 )) as {
   zSessionConfigId: { parse(value: unknown): string };
   zSessionConfigValueId: { parse(value: unknown): string };

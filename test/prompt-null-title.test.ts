@@ -14,7 +14,7 @@ import { parseQueueRequest } from "../src/session/queue/messages.js";
 
 // Inspect the installed SDK's actual generated validator without adding a dependency.
 const sdk = (await import(
-  new URL("./schema/zod.gen.js", import.meta.resolve("@agentclientprotocol/sdk")).href
+  new URL("../schema/zod.gen.js", import.meta.resolve("@agentclientprotocol/sdk")).href
 )) as { zPromptRequest: { parse(value: unknown): { prompt: unknown[] } } };
 
 function resourceLink(title: unknown) {
