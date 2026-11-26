@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Fixes
+
+- Dependencies: update fs-safe to 0.28.2 for Windows native loading and long temporary-file paths.
+
 ## 0.23.0 - 2026-11-26
 
 **Highlights:** Guard prompts against replaced sessions, improve cancellation and session recovery, preserve tool results and process failures, and clarify CLI and flow diagnostics.
