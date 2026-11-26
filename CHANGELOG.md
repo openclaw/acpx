@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+## 0.23.0 - 2026-11-26
+
+**Highlights:** Guard prompts against replaced sessions, improve cancellation and session recovery, preserve tool results and process failures, and clarify CLI and flow diagnostics.
+
 ### Changes
 
 - CLI: add `prompt --expect-record <id>` so callers can reject a replaced named session before sending or queueing a prompt. Thanks @vincentkoc.
