@@ -65,12 +65,38 @@ function assignQueueOwnerTransportOptions(
     options.mcpConfigFingerprint = record.mcpConfigFingerprint;
   }
 
+  assignAgentProcessEnvironment(options, record.agentProcessEnvironment);
   if (record.authCredentials && typeof record.authCredentials === "object") {
     const entries = Object.entries(record.authCredentials as UnknownRecord).filter(
       ([, value]) => typeof value === "string",
     ) as Array<[string, string]>;
     options.authCredentials = Object.fromEntries(entries);
   }
+}
+
+function assignAgentProcessEnvironment(options: QueueOwnerRuntimeOptions, value: unknown): void {
+  if (!value || typeof value !== "object") {
+    return;
+  }
+  const record = value as UnknownRecord;
+  options.agentProcessEnvironment = {
+    agentProcessEnv: stringRecord(record.agentProcessEnv),
+    agentProcessEnvAllow: stringArray(record.agentProcessEnvAllow),
+    agentProcessEnvBlock: stringArray(record.agentProcessEnvBlock),
+  };
+}
+
+function stringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return Object.fromEntries(
+    Object.entries(value as UnknownRecord).filter(([, entry]) => typeof entry === "string"),
+  ) as Record<string, string>;
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : undefined;
 }
 
 function assignQueueOwnerScalarOptions(

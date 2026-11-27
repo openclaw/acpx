@@ -6,6 +6,10 @@ Repo: https://github.com/openclaw/acpx
 
 ## Unreleased
 
+### Changes
+
+- Config: let a configured agent run with its own environment through optional `envAllow`, `envBlock`, and `env` keys in its `agents` entry, so it can be limited to listed inherited variables, drop specific ones, and receive its own values without putting credentials in its command. Thanks @hudson-ai.
+
 ### Fixes
 
 - Dependencies: update fs-safe to 0.28.2 for Windows native loading and long temporary-file paths.

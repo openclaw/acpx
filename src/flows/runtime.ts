@@ -14,6 +14,7 @@ import { createSessionWithClient, runOnce, sendSessionDirect } from "../session/
 import type {
   AcpJsonRpcMessage,
   AcpMessageDirection,
+  AgentProcessEnvironment,
   PromptInput,
   SessionRecord,
 } from "../types.js";
@@ -150,6 +151,7 @@ type PromptCaptureReceipt<T> = {
 
 type PreparedAcpPrompt = {
   agentInfo: ResolvedFlowAgent;
+  agentProcessEnvironment?: AgentProcessEnvironment;
   prompt: PromptInput;
   promptArtifact: FlowArtifactRef;
   attempt: FlowAttempt;
@@ -790,7 +792,7 @@ export class FlowRunner {
           node.profile,
           prepared.agentInfo,
         )
-      : await this.ensureSessionBinding(runDir, state, flow, node, prepared.agentInfo, attempt);
+      : await this.ensureSessionBinding(runDir, state, flow, node, prepared, attempt);
     if (isolated) {
       const requestedSettings = this.resolveSessionSettings(node);
       if (requestedSettings.model !== undefined || requestedSettings.configOptions.length > 0) {
@@ -822,7 +824,7 @@ export class FlowRunner {
     node: AcpNodeDefinition,
     context: FlowAttemptContext,
   ): Promise<PreparedAcpPrompt> {
-    const resolvedAgent = this.resolveAgent(node.profile);
+    const { agentProcessEnvironment, ...resolvedAgent } = this.resolveAgent(node.profile);
     const agentInfo = {
       ...resolvedAgent,
       agentArgv: resolvedAgent.agentArgv?.slice(),
@@ -854,6 +856,7 @@ export class FlowRunner {
     result.trace = { promptArtifact };
     return {
       agentInfo,
+      agentProcessEnvironment,
       prompt,
       promptArtifact,
       attempt: context.attempt,
@@ -1042,9 +1045,10 @@ export class FlowRunner {
     state: FlowRunState,
     flow: FlowDefinition,
     node: AcpNodeDefinition,
-    agent: ResolvedFlowAgent,
+    prepared: PreparedAcpPrompt,
     attempt: FlowAttempt,
   ): Promise<FlowSessionBinding> {
+    const agent = prepared.agentInfo;
     const handle = node.session?.handle ?? "main";
     const key = createSessionBindingKey(agent.agentCommand, agent.cwd, handle, agent.agentArgv);
     const existing = state.sessionBindings[key];
@@ -1064,6 +1068,7 @@ export class FlowRunner {
         cwd: agent.cwd,
         name,
         ...this.connectionOptions,
+        agentProcessEnvironment: prepared.agentProcessEnvironment,
         signal: attempt.signal,
         handleProcessInterrupts: false,
         sessionOptions: { ...this.sessionOptions, model: requestedSettings.model },
@@ -1211,6 +1216,7 @@ export class FlowRunner {
             prompt,
             resumePolicy: "same-session-only",
             ...this.connectionOptions,
+            agentProcessEnvironment: prepared.agentProcessEnvironment,
             outputFormatter: capture.formatter,
             errorEmissionPolicy: { queueErrorAlreadyEmitted: false },
             onAcpMessage: events.onAcpMessage,
@@ -1292,6 +1298,7 @@ export class FlowRunner {
             cwd: agent.cwd,
             prompt,
             ...this.connectionOptions,
+            agentProcessEnvironment: prepared.agentProcessEnvironment,
             outputFormatter: capture.formatter,
             errorEmissionPolicy: { queueErrorAlreadyEmitted: false },
             onAcpMessage: events.onAcpMessage,

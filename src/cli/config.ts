@@ -14,10 +14,16 @@ import type {
 } from "../types.js";
 import { toTimerMilliseconds } from "./timer-duration.js";
 
+export type AgentEnvConfig = {
+  envAllow?: string[];
+  envBlock?: string[];
+  env?: Record<string, string>;
+};
+
 export type ResolvedAgentConfig = {
   command: string;
   argv?: string[];
-};
+} & AgentEnvConfig;
 
 type ConfigAgentEntry = { command: string } | { argv: string[] };
 
@@ -216,9 +222,39 @@ function parseAgentEntry(raw: unknown, name: string, sourcePath: string): Resolv
   if (!isObject(raw)) {
     throw new Error(`Invalid config agents.${name} in ${sourcePath}: expected object with command`);
   }
-  return Object.prototype.hasOwnProperty.call(raw, "argv")
+  const launch = Object.prototype.hasOwnProperty.call(raw, "argv")
     ? parseArgvAgentEntry(raw, name, sourcePath)
     : parseLegacyAgentEntry(raw, name, sourcePath);
+  return { ...launch, ...parseAgentEnvConfig(raw, name, sourcePath) };
+}
+
+function parseAgentEnvConfig(
+  raw: Record<string, unknown>,
+  name: string,
+  sourcePath: string,
+): AgentEnvConfig {
+  const config: AgentEnvConfig = {};
+  for (const key of ["envAllow", "envBlock"] as const) {
+    if (raw[key] !== undefined) {
+      config[key] = parseEnvNames(raw[key], `agents.${name}.${key}`, sourcePath);
+    }
+  }
+  if (raw.env !== undefined) {
+    if (!isObject(raw.env) || !Object.values(raw.env).every((value) => typeof value === "string")) {
+      throw new Error(
+        `Invalid config agents.${name}.env in ${sourcePath}: expected object of string values`,
+      );
+    }
+    config.env = { ...(raw.env as Record<string, string>) };
+  }
+  return config;
+}
+
+function parseEnvNames(value: unknown, key: string, sourcePath: string): string[] {
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === "string")) {
+    throw new Error(`Invalid config ${key} in ${sourcePath}: expected array of strings`);
+  }
+  return [...value];
 }
 
 function parseArgvAgentEntry(

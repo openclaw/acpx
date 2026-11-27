@@ -9,6 +9,7 @@ import { applyConfigOptionsToRecord } from "../../session/config-options.js";
 import { advertisedModelState } from "../../session/model-state.js";
 import { absolutePath, isoNow } from "../../session/persistence.js";
 import type {
+  AgentProcessEnvironment,
   AcpPermissionHandler,
   AcpElicitationMode,
   AuthPolicy,
@@ -54,6 +55,7 @@ export type WithConnectedSessionOptions<T> = {
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
   permissionPolicy?: PermissionPolicy;
   onPermissionRequest?: AcpPermissionHandler;
+  agentProcessEnvironment?: AgentProcessEnvironment;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   fs?: boolean;
@@ -123,6 +125,7 @@ export async function withConnectedSession<T>(
     nonInteractivePermissions: options.nonInteractivePermissions,
     permissionPolicy: options.permissionPolicy,
     onPermissionRequest: options.onPermissionRequest,
+    ...options.agentProcessEnvironment,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
     fs: options.fs,

@@ -264,6 +264,12 @@ export type AcpProcessLifecycle = {
   onExit?: (exit: AcpProcessExit) => Promise<void> | void;
 };
 
+/** Agent child-environment controls forwarded unchanged to `AcpClient`. */
+export type AgentProcessEnvironment = Pick<
+  AcpClientOptions,
+  "agentProcessEnv" | "agentProcessEnvAllow" | "agentProcessEnvBlock"
+>;
+
 export type AcpClientOptions = {
   agentCommand: string;
   agentArgv?: string[];

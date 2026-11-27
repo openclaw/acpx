@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import type { SessionAgentOptions } from "../../runtime/engine/session-options.js";
 import type {
+  AgentProcessEnvironment,
   AuthPolicy,
   McpServer,
   NonInteractivePermissionPolicy,
@@ -15,6 +16,7 @@ export type QueueOwnerRuntimeOptions = {
   mcpConfigFingerprint?: string;
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
+  agentProcessEnvironment?: AgentProcessEnvironment;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   fs?: boolean;
@@ -140,6 +142,7 @@ export function queueOwnerRuntimeOptionsFromSend(
     ...(options.mcpConfigFingerprint ? { mcpConfigFingerprint: options.mcpConfigFingerprint } : {}),
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
+    agentProcessEnvironment: options.agentProcessEnvironment,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
     fs: options.fs,

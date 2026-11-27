@@ -15,6 +15,7 @@ import {
 } from "../cli/flags.js";
 import { readCliInputFile } from "../cli/input-file.js";
 import {
+  agentProcessEnvironment,
   resolvePermissionPolicyFromFlags,
   sessionOptionsFromGlobalFlags,
 } from "../cli/invocation-options.js";
@@ -50,7 +51,12 @@ export async function handleFlowRun(
 
   const runner = new FlowRunner({
     resolveAgent: (profile?: string) => {
-      return resolveAgentInvocation(profile ?? flags.defaultAgent, globalFlags, config);
+      const { agentEnv, ...agent } = resolveAgentInvocation(
+        profile ?? flags.defaultAgent,
+        globalFlags,
+        config,
+      );
+      return { ...agent, agentProcessEnvironment: agentProcessEnvironment(agentEnv) };
     },
     permissionMode,
     mcpServers: config.mcpServers,
