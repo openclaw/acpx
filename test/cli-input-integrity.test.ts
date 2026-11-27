@@ -241,3 +241,16 @@ test("an empty --file value is rejected instead of falling back to stdin", async
     }
   });
 });
+
+test("an empty --expect-record value is rejected instead of reported as a replaced session", async () => {
+  await fixture(async (_home, execute) => {
+    const created = await execute(["codex", "sessions", "new", "--name", "guarded"]);
+    assert.equal(created.code, 0, created.stderr);
+    for (const flag of [["--expect-record", ""], ["--expect-record="], ["--expect-record", " "]]) {
+      const result = await execute(["codex", "prompt", "-s", "guarded", ...flag, "hi"]);
+      assert.equal(result.code, 2, `${flag.join(" ")}: ${result.stderr}`);
+      assert.match(result.stderr, /Expected record id must not be empty/);
+      assert.doesNotMatch(result.stderr, /different acpxRecordId/);
+    }
+  });
+});
