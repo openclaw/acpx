@@ -27,6 +27,7 @@ import {
   addSessionNameOption,
   addSessionOption,
   parseDaysOlderThan,
+  parseNonBlankValue,
   parseNonEmptyValue,
   parsePruneBeforeDate,
   parseSessionName,
@@ -279,7 +280,7 @@ export function registerSharedAgentSubcommands(
       parseNonEmptyValue("Config option key", value),
     )
     .argument("<value>", "Config option value", (value: string) =>
-      parseNonEmptyValue("Config option value", value),
+      parseNonBlankValue("Config option value", value),
     );
   addSessionNameOption(setConfigCommand);
   setConfigCommand.action(async function (

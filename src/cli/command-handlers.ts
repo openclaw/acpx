@@ -1,10 +1,12 @@
 import path from "node:path";
 import { Command, InvalidArgumentError } from "commander";
 import { isLegacyZedCodexAcpInvocation } from "../acp/codex-compat.js";
+import { isRequestedModelUnsupportedError } from "../acp/model-support.js";
 import { AcpxOperationalError, AgentSpawnError } from "../errors.js";
 import type { SessionListResult } from "../session/execution/contracts.js";
 import { exportSession } from "../session/export.js";
 import { importSession } from "../session/import.js";
+import { advertisedModelState } from "../session/model-state.js";
 import {
   findGitRepositoryRoot,
   findSession,
@@ -553,6 +555,37 @@ export async function handleSetModel(
   printSetModelResultByFormat(modelId, result, globalFlags.format);
 }
 
+/**
+ * Send a config value, retrying once without surrounding padding when a model
+ * control rejects it as unadvertised.
+ *
+ * `set` used to trim every value, so a padded model selector was always
+ * accepted. Only the model control can reject one as unadvertised, and that
+ * rejection lands before the adapter sees a request, so one retry restores the
+ * old tolerance for every adapter, including one whose stored catalog does not
+ * name the control yet. A non-model value never produces this error, so it is
+ * never trimmed.
+ */
+async function dispatchControlValue<T>(
+  storedValue: string,
+  typedValue: string,
+  dispatch: (candidate: string) => Promise<T>,
+): Promise<{ sentValue: string; result: T }> {
+  try {
+    return { sentValue: storedValue, result: await dispatch(storedValue) };
+  } catch (error) {
+    const trimmed = typedValue.trim();
+    if (
+      trimmed === storedValue ||
+      !isRequestedModelUnsupportedError(error) ||
+      error.reason !== "unadvertised-model"
+    ) {
+      throw error;
+    }
+    return { sentValue: trimmed, result: await dispatch(trimmed) };
+  }
+}
+
 export async function handleSetConfigOption(
   explicitAgentName: string | undefined,
   configId: string,
@@ -564,7 +597,9 @@ export async function handleSetConfigOption(
   const globalFlags = resolveGlobalFlags(command, config);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
   if (configId === "model") {
-    await handleSetModel(explicitAgentName, value, flags, command, config);
+    // The shorthand is a model selector, not an opaque config value, so it keeps
+    // the trimming model selection has always tolerated.
+    await handleSetModel(explicitAgentName, value.trim(), flags, command, config);
     return;
   }
   const resolvedConfigId = resolveCompatibleConfigId(agent, configId);
@@ -575,12 +610,21 @@ export async function handleSetConfigOption(
     agent.cwd,
     resolveSessionNameFromFlags(flags, command),
   );
-  const result = await setSessionConfigOption({
-    ...sessionConnectionOptions(globalFlags, config),
-    sessionId: record.acpxRecordId,
-    configId: resolvedConfigId,
-    value,
-  });
+  // A model-category control under another id ("llm") is the one non-"model"
+  // case the CLI still normalizes, because that is a model selector too. The
+  // catalog the last connection stored names it, and trimming before dispatch
+  // also covers an owner left running from an older build, which validates ids
+  // exactly. An id the catalog does not name travels exactly as typed.
+  const dispatch = (candidate: string) =>
+    setSessionConfigOption({
+      ...sessionConnectionOptions(globalFlags, config),
+      sessionId: record.acpxRecordId,
+      configId: resolvedConfigId,
+      value: candidate,
+    });
+  const storedValue =
+    advertisedModelState(record.acpx)?.configId === resolvedConfigId ? value.trim() : value;
+  const { sentValue, result } = await dispatchControlValue(storedValue, value, dispatch);
 
   if (globalFlags.verbose && result.loadError) {
     process.stderr.write(
@@ -588,7 +632,7 @@ export async function handleSetConfigOption(
     );
   }
 
-  printSetConfigOptionResultByFormat(configId, value, result, globalFlags.format);
+  printSetConfigOptionResultByFormat(configId, sentValue, result, globalFlags.format);
 }
 
 async function tryListAgentSessions(

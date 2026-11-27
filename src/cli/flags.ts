@@ -197,6 +197,22 @@ export function parseNonEmptyValue(label: string, value: string): string {
   return trimmed;
 }
 
+/**
+ * Rejects a blank argument but keeps the text exactly as given.
+ *
+ * Non-model session config values are opaque identifiers: an adapter can
+ * advertise a value whose surrounding whitespace is part of the ID, and
+ * docs/session-control.md promises to send them unchanged. Model values are
+ * still normalized, but that happens against the connected catalog in
+ * AcpClient, not here.
+ */
+export function parseNonBlankValue(label: string, value: string): string {
+  if (value.trim().length === 0) {
+    throw new InvalidArgumentError(`${label} must not be empty`);
+  }
+  return value;
+}
+
 export function parseSessionConfigOptionAssignment(value: string): SessionConfigOptionAssignment {
   const separator = value.indexOf("=");
   if (separator <= 0 || separator === value.length - 1) {
