@@ -237,7 +237,15 @@ export function registerSharedAgentSubcommands(
   const promptCommand = parent
     .command("prompt")
     .description(descriptions.prompt)
-    .option("--expect-record <id>", "Require the routed session to have this exact acpxRecordId")
+    .option(
+      "--expect-record <id>",
+      "Require the routed session to have this exact acpxRecordId",
+      (value: string) => {
+        // Validate only: the check compares the exact id, so keep the value as given.
+        parseNonEmptyValue("Expected record id", value);
+        return value;
+      },
+    )
     .argument("[prompt...]", "Prompt text")
     .showHelpAfterError();
   addSessionOption(promptCommand);
