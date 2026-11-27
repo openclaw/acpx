@@ -78,6 +78,7 @@ export async function handleStatus(
     agentCommand: agent.agentCommand,
     cwd: agent.cwd,
     name: resolveSessionNameFromFlags(flags, command),
+    readOnly: true,
   });
 
   if (!record) {

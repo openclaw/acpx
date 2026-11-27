@@ -212,6 +212,7 @@ async function findRoutedSessionOrThrow(
     cwd,
     name: sessionName,
     boundary: walkBoundary,
+    readOnly: true,
   });
 
   if (record) {
@@ -477,6 +478,7 @@ export async function handleCancel(
     cwd: agent.cwd,
     name: resolveSessionNameFromFlags(flags, command),
     boundary: walkBoundary,
+    readOnly: true,
   });
 
   if (!record) {

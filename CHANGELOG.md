@@ -10,6 +10,8 @@ Repo: https://github.com/openclaw/acpx
 
 - Dependencies: update fs-safe to 0.28.2 for Windows native loading and long temporary-file paths.
 
+- Sessions: keep `status`, `cancel`, `sessions export`, `sessions prune` and session-routed commands that find no session from creating a session directory in an empty home. Thanks @KrasimirKralev.
+
 ## 0.23.0 - 2026-11-26
 
 **Highlights:** Guard prompts against replaced sessions, improve cancellation and session recovery, preserve tool results and process failures, and clarify CLI and flow diagnostics.

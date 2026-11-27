@@ -64,6 +64,7 @@ async function loadSessionRecord(
     agentCommand: sessionLookup.agentCommand,
     cwd,
     name,
+    readOnly: true,
   });
   if (active) {
     return active;

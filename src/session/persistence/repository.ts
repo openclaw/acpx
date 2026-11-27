@@ -27,6 +27,7 @@ type FindSessionByDirectoryWalkOptions = {
   cwd: string;
   name?: string;
   boundary?: string;
+  readOnly?: boolean;
 };
 
 function sessionFilePath(acpxRecordId: string): string {
@@ -258,7 +259,7 @@ export async function findSessionByDirectoryWalk(
   const directories = walkDirectories(options);
   let match: SessionRecord | undefined;
   let distance = Infinity;
-  for await (const record of sessionRecords()) {
+  for await (const record of sessionRecords(options.readOnly)) {
     const candidateDistance = directories.get(record.cwd);
     if (
       candidateDistance !== undefined &&
@@ -384,7 +385,7 @@ async function loadPrunableRecords(
   const records: SessionRecord[] = [];
   const cutoffIso = cutoff?.toISOString();
   const scope = agentCommand === undefined ? undefined : agentScope(agentCommand);
-  for await (const record of sessionRecords()) {
+  for await (const record of sessionRecords(true)) {
     if (isPruneCandidate(record, scope) && isBeforeCutoff(record, cutoffIso)) {
       records.push(record);
     }
