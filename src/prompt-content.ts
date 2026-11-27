@@ -20,11 +20,30 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function isBase64Char(code: number): boolean {
+  return (
+    (code >= 0x41 && code <= 0x5a) || // A-Z
+    (code >= 0x61 && code <= 0x7a) || // a-z
+    (code >= 0x30 && code <= 0x39) || // 0-9
+    code === 0x2b || // +
+    code === 0x2f // /
+  );
+}
+
+// A linear scan, not a regular expression: a backtracking pattern over the whole
+// payload overflows the regexp stack on media larger than a few megabytes.
 function isBase64Data(value: string): boolean {
   if (value.length === 0 || value.length % 4 !== 0) {
     return false;
   }
-  return /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value);
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  const end = value.length - padding;
+  for (let index = 0; index < end; index += 1) {
+    if (!isBase64Char(value.charCodeAt(index))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function isImageMimeType(value: string): boolean {
@@ -204,26 +223,32 @@ function parseStructuredPrompt(source: string): PromptInput | undefined {
   if (!source.startsWith("[")) {
     return undefined;
   }
-  try {
-    const parsed = JSON.parse(source) as unknown;
-    if (isPromptInput(parsed)) {
-      return parsed;
-    }
-    if (Array.isArray(parsed)) {
-      const detail =
-        parsed
-          .map((entry, index) => getContentBlockValidationError(entry, index))
-          .find((message) => message !== undefined) ??
-        "Structured prompt JSON must be an array of valid ACP content blocks";
-      throw new PromptInputValidationError(detail);
-    }
-    return undefined;
-  } catch (error) {
-    if (error instanceof PromptInputValidationError) {
-      throw error;
-    }
+  const parsed = parseJsonArray(source);
+  if (!parsed) {
     return undefined;
   }
+  if (isPromptInput(parsed)) {
+    return parsed;
+  }
+  const detail =
+    parsed
+      .map((entry, index) => getContentBlockValidationError(entry, index))
+      .find((message) => message !== undefined) ??
+    "Structured prompt JSON must be an array of valid ACP content blocks";
+  throw new PromptInputValidationError(detail);
+}
+
+// Only text that is not JSON falls back to a plain-text prompt. Errors raised
+// while validating parsed blocks must surface instead of turning the whole
+// structured prompt into text.
+function parseJsonArray(source: string): unknown[] | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    return undefined;
+  }
+  return Array.isArray(parsed) ? parsed : undefined;
 }
 
 export function parsePromptSource(source: string): PromptInput {

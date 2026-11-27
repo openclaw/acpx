@@ -71,6 +71,47 @@ test("parsePromptSource rejects image blocks with invalid base64 payloads", () =
   );
 });
 
+test("parsePromptSource keeps large image and audio payloads as media blocks", () => {
+  // Large enough to overflow the regexp stack of a backtracking base64 pattern.
+  const size = 8 * 1024 * 1024;
+  const audio = "A".repeat(size);
+  const image = `${"B".repeat(size - 4)}AA==`;
+  const prompt = parsePromptSource(
+    JSON.stringify([
+      { type: "text", text: "Transcribe this." },
+      { type: "audio", mimeType: "audio/ogg", data: audio },
+      { type: "image", mimeType: "image/png", data: image },
+    ]),
+  );
+
+  assert.deepEqual(
+    prompt.map((block) => block.type),
+    ["text", "audio", "image"],
+  );
+  assert.equal(prompt[1]?.type === "audio" ? prompt[1].data.length : 0, size);
+  assert.equal(prompt[2]?.type === "image" ? prompt[2].data.length : 0, size);
+  assert.equal(isPromptInput(prompt), true);
+});
+
+test("parsePromptSource rejects a large audio payload with invalid base64", () => {
+  const data = `${"A".repeat(8 * 1024 * 1024 - 4)}A%A=`;
+  assert.throws(
+    () => parsePromptSource(JSON.stringify([{ type: "audio", mimeType: "audio/ogg", data }])),
+    (error: unknown) =>
+      error instanceof PromptInputValidationError &&
+      error.message.includes("audio block data must be valid base64"),
+  );
+});
+
+test("parsePromptSource checks base64 padding", () => {
+  const block = (data: string) => [{ type: "image", mimeType: "image/png", data }];
+  assert.equal(isPromptInput(block("aW1hZ2U=")), true);
+  assert.equal(isPromptInput(block("aW1hZw==")), true);
+  for (const data of ["aW1hZ2U", "aW1h=2U=", "aW1hZ===", "====", "aW1h\nZ2U="]) {
+    assert.equal(isPromptInput(block(data)), false, data);
+  }
+});
+
 test("parsePromptSource keeps non-JSON bracket text as plain text", () => {
   assert.deepEqual(
     parsePromptSource("[todo] validate image input"),
