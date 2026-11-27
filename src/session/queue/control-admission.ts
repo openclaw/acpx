@@ -97,6 +97,7 @@ export type QueueOwnerControlMethods = {
     configId: string,
     value: string,
     deadline?: QueueControlDeadline,
+    cliModelInput?: true,
   ) => Promise<SetSessionConfigOptionResponse>;
 };
 

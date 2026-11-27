@@ -564,7 +564,7 @@ export async function handleSetConfigOption(
   const globalFlags = resolveGlobalFlags(command, config);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
   if (configId === "model") {
-    await handleSetModel(explicitAgentName, value, flags, command, config);
+    await handleSetModel(explicitAgentName, value.trim(), flags, command, config);
     return;
   }
   const resolvedConfigId = resolveCompatibleConfigId(agent, configId);
@@ -580,6 +580,7 @@ export async function handleSetConfigOption(
     sessionId: record.acpxRecordId,
     configId: resolvedConfigId,
     value,
+    cliModelInput: true,
   });
 
   if (globalFlags.verbose && result.loadError) {

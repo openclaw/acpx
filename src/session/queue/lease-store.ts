@@ -55,6 +55,7 @@ export type QueueOwnerRecord = {
   sharedRuntime?: boolean;
   sessionWatch?: boolean;
   persistsControlState?: boolean;
+  supportsCliConfigOptionIntent?: boolean;
   mcpConfigPath?: string;
   mcpConfigFingerprint?: string;
 };
@@ -110,11 +111,17 @@ function parseQueueOwnerRecord(raw: unknown): QueueOwnerRecord | null {
 
 function parseQueueOwnerCapabilities(
   record: Record<string, unknown>,
-): Pick<QueueOwnerRecord, "sharedRuntime" | "sessionWatch" | "persistsControlState"> {
+): Pick<
+  QueueOwnerRecord,
+  "sharedRuntime" | "sessionWatch" | "persistsControlState" | "supportsCliConfigOptionIntent"
+> {
   return {
     ...(record.sharedRuntime === true ? { sharedRuntime: true } : {}),
     ...(record.sessionWatch === true ? { sessionWatch: true } : {}),
     ...(record.persistsControlState === true ? { persistsControlState: true } : {}),
+    ...(record.supportsCliConfigOptionIntent === true
+      ? { supportsCliConfigOptionIntent: true }
+      : {}),
   };
 }
 
@@ -605,6 +612,7 @@ async function stageQueueOwnerRecord(
       sharedRuntime: true,
       sessionWatch: true,
       persistsControlState: true,
+      supportsCliConfigOptionIntent: true,
       ...(lease.mcpConfigPath ? { mcpConfigPath: lease.mcpConfigPath } : {}),
       ...(lease.mcpConfigFingerprint ? { mcpConfigFingerprint: lease.mcpConfigFingerprint } : {}),
     },

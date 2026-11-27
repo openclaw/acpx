@@ -189,6 +189,13 @@ export function parseSessionName(value: string): string {
   return trimmed;
 }
 
+export function parseNonBlankOpaqueValue(label: string, value: string): string {
+  if (value.trim().length === 0) {
+    throw new InvalidArgumentError(`${label} must not be empty`);
+  }
+  return value;
+}
+
 export function parseNonEmptyValue(label: string, value: string): string {
   const trimmed = value.trim();
   if (trimmed.length === 0) {

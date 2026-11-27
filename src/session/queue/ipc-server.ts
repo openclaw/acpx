@@ -104,6 +104,7 @@ export type QueueOwnerControlHandlers = {
     configId: string,
     value: string,
     timeoutMs?: number,
+    cliModelInput?: true,
   ) => Promise<SetSessionConfigOptionResponse>;
 };
 
@@ -534,7 +535,7 @@ export class SessionQueueOwner {
       });
       return true;
     }
-    if (request.type === "set_config_option") {
+    if (request.type === "set_config_option" || request.type === "set_cli_config_option") {
       this.handleControlRequest({
         socket,
         requestId: request.requestId,
@@ -545,6 +546,7 @@ export class SessionQueueOwner {
             request.configId,
             request.value,
             request.timeoutMs,
+            request.type === "set_cli_config_option" ? true : undefined,
           ),
         }),
       });

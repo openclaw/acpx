@@ -1,7 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { runTimedExecFile, splitCommandLine } from "../../acp/client-process.js";
-import { resolveRequestedConfigOption, resolveRequestedModelId } from "../../acp/model-support.js";
+import {
+  normalizeCliConfigOptionValue,
+  resolveRequestedConfigOption,
+  resolveRequestedModelId,
+} from "../../acp/model-support.js";
 import type {
   SessionRecord,
   SessionSetConfigOptionResult,
@@ -157,6 +161,7 @@ export async function setSessionConfigOptionOnOwner(
     options.timeoutMs,
     options.verbose,
     options.assertDispatch,
+    options.cliModelInput,
   );
   if (!ownerResponse) {
     return undefined;
@@ -164,16 +169,22 @@ export async function setSessionConfigOptionOnOwner(
   const record = await resolveSessionRecord(options.sessionId);
   if (!ownerResponse.persistsControlState) {
     const models = advertisedModelState(record.acpx);
-    const { modelConfigId, resolvedValue } = resolveRequestedConfigOption({
+    const value = normalizeCliConfigOptionValue({
       configId: options.configId,
       value: options.value,
+      models,
+      cliModelInput: options.cliModelInput,
+    });
+    const { modelConfigId, resolvedValue } = resolveRequestedConfigOption({
+      configId: options.configId,
+      value,
       models,
       agentCommand: record.agentCommand,
     });
     record.acpx = applyConfigOptionSelection(
       record.acpx,
       options.configId,
-      options.value,
+      value,
       ownerResponse.value,
       modelConfigId,
       resolvedValue,
