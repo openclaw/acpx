@@ -93,6 +93,7 @@ type MockAgentOptions = {
   supportsCloseSession: boolean;
   supportsListSessions: boolean;
   listPageSize: number;
+  sessionIdMarker?: string;
   closeSessionMarker?: string;
   loadSessionNotFound: boolean;
   resumeSessionNotFound: boolean;
@@ -108,6 +109,7 @@ type MockAgentOptions = {
   setSessionModelInvalidParams: boolean;
   advertiseConfigOptions: boolean;
   advertiseModels: boolean;
+  advertiseDefaultModelSentinel: boolean;
   advertiseModelProvider: boolean;
   advertiseLegacyModels: boolean;
   advertiseCommandsAfterNew: boolean;
@@ -372,6 +374,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   let supportsCloseSession = false;
   let supportsListSessions = false;
   let listPageSize = 100;
+  let sessionIdMarker: string | undefined;
   let closeSessionMarker: string | undefined;
   let loadSessionNotFound = false;
   let resumeSessionNotFound = false;
@@ -386,6 +389,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
   let setSessionModelInvalidParams = false;
   let advertiseConfigOptions = false;
   let advertiseModels = false;
+  let advertiseDefaultModelSentinel = false;
   let advertiseModelProvider = false;
   let advertiseLegacyModels = false;
   let advertiseCommandsAfterNew = false;
@@ -485,6 +489,12 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
       continue;
     }
 
+    if (token === "--advertise-default-model-sentinel") {
+      advertiseModels = true;
+      advertiseDefaultModelSentinel = true;
+      continue;
+    }
+
     if (token === "--advertise-model-provider") {
       advertiseModels = true;
       advertiseModelProvider = true;
@@ -549,6 +559,12 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     if (token === "--list-page-size") {
       supportsListSessions = true;
       listPageSize = parsePositiveIntegerOption(argv, index + 1, token);
+      index += 1;
+      continue;
+    }
+
+    if (token === "--session-id-marker") {
+      sessionIdMarker = parseOptionValue(argv, index + 1, token);
       index += 1;
       continue;
     }
@@ -639,6 +655,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     supportsCloseSession,
     supportsListSessions,
     listPageSize,
+    sessionIdMarker,
     closeSessionMarker,
     loadSessionNotFound,
     resumeSessionNotFound,
@@ -656,6 +673,7 @@ function parseMockAgentOptions(argv: string[]): MockAgentOptions {
     advertiseModels:
       advertiseModels ||
       ((setSessionModelFails || setSessionModelInvalidParams) && !advertiseLegacyModels),
+    advertiseDefaultModelSentinel,
     advertiseModelProvider,
     advertiseLegacyModels,
     advertiseCommandsAfterNew,
@@ -758,6 +776,7 @@ function buildConfigOptions(
   omitModelId?: string,
   currentModelId = state.modelId,
   includeProvider = false,
+  includeDefaultModelSentinel = false,
 ): SetSessionConfigOptionResponse["configOptions"] {
   const reasoningEffort =
     typeof state.configValues.reasoning_effort === "string"
@@ -765,6 +784,7 @@ function buildConfigOptions(
       : "medium";
 
   const modelOptions = [
+    ...(includeDefaultModelSentinel ? [{ value: "default", name: "Default" }] : []),
     { value: DEFAULT_MODEL_ID, name: DEFAULT_MODEL_ID },
     { value: "fast-model", name: "fast-model" },
     { value: "smart-model", name: "smart-model" },
@@ -869,6 +889,9 @@ class MockAgent implements Agent {
 
     const sessionId = randomUUID();
     this.sessions.set(sessionId, { ...createSessionState(false), mcpServers: params.mcpServers });
+    if (this.options.sessionIdMarker) {
+      writeFileSync(this.options.sessionIdMarker, `${sessionId}\n`);
+    }
 
     await this.runOptionalAction(sessionId, this.options.newSessionAction);
 
@@ -895,6 +918,7 @@ class MockAgent implements Agent {
         this.options.omitReconnectModelId,
         undefined,
         this.options.advertiseModelProvider,
+        this.options.advertiseDefaultModelSentinel,
       );
     }
 
@@ -919,6 +943,8 @@ class MockAgent implements Agent {
     if (this.options.loadSessionNotFound) {
       throw RequestError.resourceNotFound(params.sessionId);
     }
+
+    this.assertMarkedSession(params.sessionId);
 
     const existing = this.sessions.get(params.sessionId);
     if (this.options.loadSessionFailsOnEmpty && (!existing || !existing.hasCompletedPrompt)) {
@@ -964,6 +990,8 @@ class MockAgent implements Agent {
       throw RequestError.resourceNotFound(params.sessionId);
     }
 
+    this.assertMarkedSession(params.sessionId);
+
     const existing = this.sessions.get(params.sessionId);
     this.sessions.set(params.sessionId, existing ?? createSessionState(false));
 
@@ -990,6 +1018,7 @@ class MockAgent implements Agent {
         this.options.omitReconnectModelId,
         undefined,
         this.options.advertiseModelProvider,
+        this.options.advertiseDefaultModelSentinel,
       );
     }
 
@@ -998,6 +1027,16 @@ class MockAgent implements Agent {
       this.ensureSession(sessionId),
       this.options.advertiseLegacyModels,
     );
+  }
+
+  private assertMarkedSession(sessionId: SessionId): void {
+    if (!this.options.sessionIdMarker) {
+      return;
+    }
+    const expectedSessionId = readFileSync(this.options.sessionIdMarker, "utf8").trim();
+    if (sessionId !== expectedSessionId) {
+      throw RequestError.resourceNotFound(sessionId);
+    }
   }
 
   async closeSession(params: CloseSessionRequest): Promise<CloseSessionResponse> {
@@ -1225,6 +1264,7 @@ class MockAgent implements Agent {
         this.options.omitReconnectModelId,
         this.options.reportModelAs,
         this.options.advertiseModelProvider,
+        this.options.advertiseDefaultModelSentinel,
       ),
     };
   }
